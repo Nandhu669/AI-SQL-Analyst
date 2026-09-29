@@ -1,209 +1,235 @@
-import { useState } from 'react'
-import { checkHealth } from './api/health'
-import type { HealthResponse } from './api/health'
+/**
+ * App.tsx — Main layout and query lifecycle orchestrator.
+ *
+ * Day 3 responsibilities:
+ *  1. Render the page header with status badges
+ *  2. Render the query input box
+ *  3. On submit → call simulateQuery() with a 1.5s fake delay
+ *  4. On success → show SQL preview, chart, and results table
+ *  5. On error → show an error state
+ *
+ * Day 4 change:
+ *  Replace simulateQuery() with a real fetch() to POST /api/v1/mcp/query
+ *  Everything else stays the same.
+ */
 
-// Status of the backend connectivity check
-type CheckStatus = 'idle' | 'loading' | 'ok' | 'error'
+import { useState } from 'react'
+import { StatusBar } from './components/StatusBar'
+import { QueryInput } from './components/QueryInput'
+import { SqlPreview } from './components/SqlPreview'
+import { ResultsChart } from './components/ResultsChart'
+import { ResultsTable } from './components/ResultsTable'
+import { simulateQuery } from './mocks/mockQueryResult'
+import type { QueryResult, QueryStatus } from './types/query'
 
 function App() {
-  const [status, setStatus] = useState<CheckStatus>('idle')
-  const [response, setResponse] = useState<HealthResponse | null>(null)
+  const [status, setStatus] = useState<QueryStatus>('idle')
+  const [result, setResult] = useState<QueryResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
+  const [lastQuestion, setLastQuestion] = useState<string>('')
 
-  const handleCheck = async () => {
+  // ── Query handler ───────────────────────────────────────────────────────────
+  // Day 4: replace simulateQuery with real API call
+  const handleQuery = async (question: string) => {
     setStatus('loading')
-    setResponse(null)
+    setResult(null)
     setErrorMsg('')
+    setLastQuestion(question)
 
     try {
-      const data = await checkHealth()
-      setResponse(data)
-      setStatus('ok')
+      const data = await simulateQuery(question)
+      setResult(data)
+      setStatus('success')
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : 'Unknown error'
-      setErrorMsg(
-        `Backend unreachable (${msg}). ` +
-        'Make sure FastAPI is running: cd backend && uvicorn app.main:app --reload'
-      )
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setErrorMsg(msg)
       setStatus('error')
     }
   }
 
   return (
     <div style={styles.page}>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header style={styles.header}>
-        <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
-        <span style={styles.badge}>Phase 1 · Day 2 Foundation</span>
+        <div style={styles.headerLeft}>
+          <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
+          <span style={styles.phase}>Phase 1 · Day 3</span>
+        </div>
+        <StatusBar />
       </header>
 
-      <main style={styles.card}>
-        <p style={styles.description}>
-          This page confirms that the React frontend can talk to the FastAPI
-          backend. The actual AI-to-SQL features will be added in later phases.
-        </p>
+      {/* ── Main content ───────────────────────────────────────────────────── */}
+      <main style={styles.main}>
 
-        <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>Backend Connectivity</h2>
-          <p style={styles.hint}>
-            Endpoint: <code>GET /healthz</code>
-          </p>
+        {/* Query input */}
+        <section style={styles.card}>
+          <QueryInput onSubmit={handleQuery} status={status} />
+        </section>
 
-          <button
-            style={{
-              ...styles.button,
-              opacity: status === 'loading' ? 0.7 : 1,
-            }}
-            onClick={handleCheck}
-            disabled={status === 'loading'}
-          >
-            {status === 'loading' ? '⏳ Checking…' : '🔍 Check Backend Health'}
-          </button>
-
-          {status === 'ok' && response && (
-            <div style={{ ...styles.result, ...styles.resultOk }}>
-              <strong>✅ Backend is reachable</strong>
-              <pre style={styles.pre}>{JSON.stringify(response, null, 2)}</pre>
+        {/* Loading state */}
+        {status === 'loading' && (
+          <div style={styles.loadingBanner}>
+            <span style={styles.spinner}>⏳</span>
+            <div>
+              <div style={styles.loadingTitle}>Analyzing your question…</div>
+              <div style={styles.loadingSubtitle}>
+                "{lastQuestion}"
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {status === 'error' && (
-            <div style={{ ...styles.result, ...styles.resultError }}>
-              <strong>❌ Connection failed</strong>
-              <p style={styles.errorText}>{errorMsg}</p>
-            </div>
-          )}
-        </div>
+        {/* Error state */}
+        {status === 'error' && (
+          <div style={styles.errorBanner}>
+            <strong>❌ Something went wrong</strong>
+            <p style={styles.errorText}>{errorMsg}</p>
+          </div>
+        )}
 
-        <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>Architecture</h2>
-          <table style={styles.table}>
-            <tbody>
-              {[
-                ['Frontend', 'React + TypeScript (Vite)'],
-                ['Backend', 'Python + FastAPI'],
-                ['Database', 'Supabase PostgreSQL (Day 3+)'],
-                ['LLM Gateway', 'OpenRouter (Day 4+)'],
-                ['Frontend Deploy', 'Vercel (Day 8+)'],
-                ['Backend Deploy', 'Railway (Day 8+)'],
-              ].map(([layer, tech]) => (
-                <tr key={layer}>
-                  <td style={styles.tdLabel}>{layer}</td>
-                  <td style={styles.tdValue}>{tech}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {/* Results — shown only after a successful query */}
+        {status === 'success' && result && (
+          <>
+            {/* SQL preview */}
+            <section>
+              <SqlPreview result={result} />
+            </section>
+
+            {/* Chart */}
+            <section>
+              <ResultsChart result={result} />
+            </section>
+
+            {/* Table */}
+            <section>
+              <ResultsTable result={result} />
+            </section>
+          </>
+        )}
+
+        {/* Idle state hint */}
+        {status === 'idle' && (
+          <div style={styles.idleHint}>
+            <div style={styles.idleIcon}>💬</div>
+            <p style={styles.idleText}>
+              Type a question above and click <strong>Analyze</strong> to see the
+              generated SQL, chart, and data table.
+            </p>
+            <p style={styles.idleNote}>
+              Day 3 uses mock data — real AI + database comes in Days 4–8.
+            </p>
+          </div>
+        )}
       </main>
     </div>
   )
 }
 
-// ── Inline styles (no extra dependencies needed for Day 2) ────────────────────
+export default App
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
     fontFamily: "'Segoe UI', system-ui, sans-serif",
-    maxWidth: 680,
-    margin: '60px auto',
-    padding: '0 24px',
+    maxWidth: 860,
+    margin: '0 auto',
+    padding: '0 20px 60px',
     color: '#1a1a1a',
   },
   header: {
     display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 16,
-    marginBottom: 32,
+    padding: '20px 0 16px',
+    borderBottom: '1px solid #f3f4f6',
+    marginBottom: 24,
     flexWrap: 'wrap',
+    gap: 12,
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
   },
   title: {
     margin: 0,
-    fontSize: '2rem',
+    fontSize: '1.5rem',
+    fontWeight: 700,
   },
-  badge: {
-    background: '#e0f2fe',
-    color: '#0369a1',
+  phase: {
+    background: '#eff6ff',
+    color: '#2563eb',
     borderRadius: 20,
-    padding: '4px 14px',
-    fontSize: '0.85rem',
+    padding: '3px 12px',
+    fontSize: '0.78rem',
     fontWeight: 600,
+  },
+  main: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
   },
   card: {
     border: '1px solid #e5e7eb',
-    borderRadius: 12,
-    padding: 32,
-    background: '#fafafa',
+    borderRadius: 10,
+    padding: 20,
+    background: '#fff',
   },
-  description: {
-    color: '#6b7280',
-    marginTop: 0,
-    lineHeight: 1.6,
+  loadingBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    padding: '16px 20px',
+    background: '#fffbeb',
+    border: '1px solid #fde68a',
+    borderRadius: 10,
   },
-  section: {
-    marginTop: 28,
+  spinner: {
+    fontSize: '1.5rem',
+    animation: 'spin 1s linear infinite',
   },
-  sectionTitle: {
-    fontSize: '1.1rem',
-    marginBottom: 8,
-    marginTop: 0,
-    color: '#111827',
-  },
-  hint: {
-    color: '#6b7280',
-    fontSize: '0.9rem',
-    margin: '0 0 16px',
-  },
-  button: {
-    padding: '10px 22px',
-    fontSize: '0.95rem',
+  loadingTitle: {
     fontWeight: 600,
-    background: '#2563eb',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 8,
-    cursor: 'pointer',
-  },
-  result: {
-    marginTop: 16,
-    padding: '14px 18px',
-    borderRadius: 8,
+    color: '#92400e',
     fontSize: '0.9rem',
   },
-  resultOk: {
-    background: '#f0fdf4',
-    border: '1px solid #86efac',
-    color: '#166534',
+  loadingSubtitle: {
+    color: '#b45309',
+    fontSize: '0.82rem',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
-  resultError: {
+  errorBanner: {
+    padding: '16px 20px',
     background: '#fef2f2',
     border: '1px solid #fca5a5',
+    borderRadius: 10,
     color: '#991b1b',
   },
-  pre: {
-    margin: '8px 0 0',
-    fontFamily: 'monospace',
-    fontSize: '0.85rem',
-    whiteSpace: 'pre-wrap',
-  },
   errorText: {
-    margin: '8px 0 0',
-    lineHeight: 1.5,
+    margin: '6px 0 0',
+    fontSize: '0.875rem',
   },
-  table: {
-    borderCollapse: 'collapse',
-    width: '100%',
-    fontSize: '0.9rem',
+  idleHint: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    border: '1.5px dashed #e5e7eb',
+    borderRadius: 10,
+    background: '#fafafa',
   },
-  tdLabel: {
-    padding: '6px 12px 6px 0',
-    fontWeight: 600,
+  idleIcon: {
+    fontSize: '2.5rem',
+    marginBottom: 12,
+  },
+  idleText: {
     color: '#374151',
-    whiteSpace: 'nowrap',
+    margin: '0 0 8px',
+    lineHeight: 1.6,
   },
-  tdValue: {
-    padding: '6px 0',
-    color: '#6b7280',
+  idleNote: {
+    color: '#9ca3af',
+    fontSize: '0.82rem',
+    margin: 0,
   },
 }
-
-export default App
