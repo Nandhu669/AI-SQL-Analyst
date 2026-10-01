@@ -19,7 +19,7 @@ import { QueryInput } from './components/QueryInput'
 import { SqlPreview } from './components/SqlPreview'
 import { ResultsChart } from './components/ResultsChart'
 import { ResultsTable } from './components/ResultsTable'
-import { simulateQuery } from './mocks/mockQueryResult'
+import { generateQuery, executeQuery } from './api/mcp'
 import type { QueryResult, QueryStatus } from './types/query'
 
 function App() {
@@ -29,7 +29,9 @@ function App() {
   const [lastQuestion, setLastQuestion] = useState<string>('')
 
   // ── Query handler ───────────────────────────────────────────────────────────
-  // Day 4: replace simulateQuery with real API call
+  // Day 4: two real API calls — generate SQL, then execute it
+  // Day 5: /execute returns real Supabase rows
+  // Day 7: /query returns real LLM-generated SQL
   const handleQuery = async (question: string) => {
     setStatus('loading')
     setResult(null)
@@ -37,7 +39,21 @@ function App() {
     setLastQuestion(question)
 
     try {
-      const data = await simulateQuery(question)
+      // Step 1: generate SQL from the user's question
+      const { sql } = await generateQuery(question)
+
+      // Step 2: execute the generated SQL
+      const execResult = await executeQuery(sql)
+
+      // Step 3: map backend snake_case to frontend camelCase
+      const data: QueryResult = {
+        sql,
+        columns: execResult.columns,
+        rows: execResult.rows,
+        executionTimeMs: execResult.execution_time_ms,
+        rowCount: execResult.row_count,
+      }
+
       setResult(data)
       setStatus('success')
     } catch (err) {
@@ -53,7 +69,7 @@ function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
-          <span style={styles.phase}>Phase 1 · Day 3</span>
+          <span style={styles.phase}>Phase 1 · Day 4</span>
         </div>
         <StatusBar />
       </header>
