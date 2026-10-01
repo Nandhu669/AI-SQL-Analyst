@@ -2,29 +2,31 @@
 
 > Ask questions in plain English, get SQL answers — a learning project built day by day.
 
-**Current phase:** Phase 1 · Day 2 — Foundation Setup  
-**Status:** Foundation complete · AI/SQL features coming in later phases
+**Current phase:** Phase 1 · Day 4 — FastAPI Backend Routes  
+**Branch:** `main`  
+**Status:** Frontend UI shell + real API routes complete · Database & AI integration coming in Days 5–8
 
 ---
 
 ## What This Project Does
 
-This tool lets users describe a data question in natural language (e.g. *"How many orders were placed last month?"*) and receive a validated, executable SQL query in return. The AI component uses an LLM (via OpenRouter) to translate the question, and results are run against a Supabase PostgreSQL database.
-
-Day 2 establishes the complete development foundation — the project structure, frontend, backend, health check, and environment configuration — without any AI or database functionality yet.
+This tool lets users describe a data question in natural language (e.g. *"Show me total sales by product for the last 30 days"*) and receive a validated, executable SQL query in return. The AI component uses an LLM (via OpenRouter) to translate the question, and results are run against a Supabase PostgreSQL database — then displayed as an interactive table and chart.
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React + TypeScript (Vite) |
-| Backend | Python + FastAPI |
-| Database | Supabase PostgreSQL *(Day 3+)* |
-| LLM Gateway | OpenRouter *(Day 4+)* |
-| Frontend Deploy | Vercel *(Day 8+)* |
-| Backend Deploy | Railway *(Day 8+)* |
+| Layer | Technology | Status |
+|---|---|---|
+| Frontend | React + TypeScript (Vite) | ✅ Day 2 |
+| Backend | Python + FastAPI | ✅ Day 2 |
+| SQL Parser | sqlglot | ✅ Day 4 |
+| Charts | Recharts | ✅ Day 3 |
+| SQL Highlighting | react-syntax-highlighter | ✅ Day 3 |
+| Database | Supabase PostgreSQL | 🔜 Day 5 |
+| LLM Gateway | OpenRouter | 🔜 Day 7 |
+| Frontend Deploy | Vercel | 🔜 Day 13 |
+| Backend Deploy | Railway | 🔜 Day 13 |
 
 ---
 
@@ -32,26 +34,40 @@ Day 2 establishes the complete development foundation — the project structure,
 
 ```
 AI-SQL-Analyst-Sandbox/
-├── frontend/               ← React + TypeScript (Vite)
+├── frontend/                        ← React + TypeScript (Vite)
 │   ├── src/
-│   │   ├── main.tsx        ← App entry point
-│   │   ├── App.tsx         ← Main UI component
-│   │   └── api/
-│   │       └── health.ts   ← Backend API calls
-│   ├── .env.example        ← Frontend env template
+│   │   ├── main.tsx                 ← App entry point
+│   │   ├── App.tsx                  ← Main layout + query lifecycle
+│   │   ├── api/
+│   │   │   ├── health.ts            ← GET /healthz call
+│   │   │   └── mcp.ts               ← POST /query, POST /execute, GET /tools, GET /schema
+│   │   ├── components/
+│   │   │   ├── QueryInput.tsx        ← NL text box + submit + example chips
+│   │   │   ├── SqlPreview.tsx        ← Syntax-highlighted SQL + copy button + badges
+│   │   │   ├── StatusBar.tsx         ← Backend / DB / LLM connection badges
+│   │   │   ├── ResultsTable.tsx      ← Dynamic data table (columns + rows)
+│   │   │   └── ResultsChart.tsx      ← Bar / Line / Pie chart tabs (Recharts)
+│   │   ├── types/
+│   │   │   └── query.ts              ← Shared TypeScript types (QueryResult, etc.)
+│   │   └── mocks/
+│   │       └── mockQueryResult.ts    ← Mock data (reference shape for real API)
+│   ├── .env.example
 │   └── package.json
-├── backend/                ← Python + FastAPI
+├── backend/                         ← Python + FastAPI
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py         ← FastAPI app + /healthz endpoint
-│   │   └── config.py       ← Typed settings (pydantic-settings)
-│   ├── .env.example        ← Backend env template
+│   │   ├── main.py                  ← FastAPI app + CORS + router registration
+│   │   ├── config.py                ← Typed settings via pydantic-settings
+│   │   ├── models/
+│   │   │   └── mcp.py               ← Pydantic request/response models
+│   │   └── routers/
+│   │       └── mcp.py               ← 4 MCP endpoints (query, execute, tools, schema)
+│   ├── .env.example
 │   └── requirements.txt
-├── database/               ← SQL migrations (Day 3+)
-├── tests/                  ← Test suites (Day 3+)
-├── docs/                   ← Extended documentation
+├── database/                        ← SQL migrations (Day 5+)
+├── tests/                           ← Test suites (Day 10+)
+├── docs/                            ← Extended documentation
 ├── .gitignore
-└── README.md               ← This file
+└── README.md
 ```
 
 ---
@@ -69,8 +85,8 @@ AI-SQL-Analyst-Sandbox/
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repo-url>
-cd AI-SQL-Analyst-Sandbox
+git clone https://github.com/Nandhu669/AI-SQL-Analyst.git
+cd AI-SQL-Analyst
 ```
 
 ---
@@ -91,7 +107,7 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy the environment template (no real values needed for Day 2)
+# Copy the environment template
 cp .env.example .env
 
 # Start the backend
@@ -99,7 +115,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 The backend is running at **http://localhost:8000**  
-Interactive API docs: **http://localhost:8000/docs**
+Interactive API docs (Swagger UI): **http://localhost:8000/docs**
 
 ---
 
@@ -130,90 +146,115 @@ The frontend is running at **http://localhost:5173**
 
 | Variable | Description | Required |
 |---|---|---|
-| `VITE_API_BASE_URL` | FastAPI backend URL | No (defaults to `http://localhost:8000`) |
+| `VITE_API_BASE_URL` | FastAPI backend URL | No — defaults to `http://localhost:8000` |
 
 ### Backend — `backend/.env`
 
 | Variable | Description | Required |
 |---|---|---|
-| `SUPABASE_URL` | Supabase project URL | Day 3+ |
-| `SUPABASE_KEY` | Supabase anon/service key | Day 3+ |
-| `OPENROUTER_API_KEY` | OpenRouter API key for LLM access | Day 4+ |
+| `SUPABASE_URL` | Supabase project URL | Day 5+ |
+| `SUPABASE_KEY` | Supabase anon/service key | Day 5+ |
+| `OPENROUTER_API_KEY` | OpenRouter API key for LLM access | Day 7+ |
 
 > **Important:** Never commit real `.env` files. They are gitignored. Only `.env.example` files are tracked.
 
 ---
 
-## Verifying the Setup
+## API Reference
 
-### Health check (curl / PowerShell)
+All routes are documented interactively at **http://localhost:8000/docs**
+
+| Method | Endpoint | What it does | Status |
+|---|---|---|---|
+| `GET` | `/healthz` | Backend health check | ✅ Day 2 |
+| `POST` | `/api/v1/mcp/query` | Convert NL question → SQL | ✅ Day 4 (stub → real LLM in Day 7) |
+| `POST` | `/api/v1/mcp/execute` | Execute a validated read-only SQL query | ✅ Day 4 (stub → real DB in Day 5) |
+| `GET` | `/api/v1/mcp/tools` | List available tool definitions | ✅ Day 4 |
+| `GET` | `/api/v1/mcp/schema` | Return database table/column schema | ✅ Day 4 (stub → live introspection in Day 5) |
+
+### SQL Safety
+
+`POST /api/v1/mcp/execute` uses **sqlglot** to parse the SQL into an AST before running it.  
+Any query that is not a `SELECT` statement is rejected with `HTTP 400` — immediately, permanently.  
+This includes: `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE`.
 
 ```bash
-# curl:
-curl http://localhost:8000/healthz
-
-# PowerShell:
-Invoke-WebRequest http://localhost:8000/healthz | Select-Object -ExpandProperty Content
+# Test the safety check (PowerShell):
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/mcp/execute" `
+  -Method POST -ContentType "application/json" `
+  -Body '{"sql":"DROP TABLE orders"}'
+# → HTTP 400: Only SELECT queries are allowed.
 ```
-
-Expected response:
-```json
-{"status": "ok"}
-```
-
-### Frontend health check button
-
-1. Start the backend.
-2. Start the frontend.
-3. Open **http://localhost:5173**.
-4. Click **"Check Backend Health"**.
-5. You should see a green ✅ confirmation with the JSON response.
-
-If the backend is not running, you'll see a red ❌ error with instructions.
 
 ---
 
 ## How Frontend Communicates With Backend
 
-The frontend reads `VITE_API_BASE_URL` from its `.env` file (defaults to `http://localhost:8000`).
-All API calls go through `frontend/src/api/` — never with a hardcoded URL in component code.
+The frontend reads `VITE_API_BASE_URL` from its `.env` file (defaults to `http://localhost:8000`).  
+All API calls go through `frontend/src/api/` — no hardcoded URLs in component code.
 
 ```
-React (localhost:5173)  →  GET /healthz  →  FastAPI (localhost:8000)
+User types question
+      ↓
+React (localhost:5173)
+      ↓
+POST /api/v1/mcp/query   →  FastAPI returns generated SQL
+      ↓
+POST /api/v1/mcp/execute →  FastAPI validates + returns rows
+      ↓
+SqlPreview + ResultsChart + ResultsTable render the result
 ```
 
 CORS is configured in `backend/app/main.py` to allow `http://localhost:5173` during local development.
 
 ---
 
-## Day 2 Scope (What Is Implemented)
+## Day-by-Day Build Log
 
-- [x] Monorepo-style project structure
-- [x] React + TypeScript frontend (Vite)
-- [x] FastAPI backend
-- [x] `GET /healthz` health endpoint
-- [x] Frontend → backend connectivity check UI
-- [x] Environment variable templates (no real secrets)
-- [x] Root `.gitignore`
-- [x] Initial Git commit
+### ✅ Day 2 — Foundation Setup
+- Monorepo project structure (`frontend/`, `backend/`, `database/`, `tests/`, `docs/`)
+- React + TypeScript frontend (Vite)
+- FastAPI backend with `GET /healthz`
+- Environment variable templates (no real secrets)
+- Root `.gitignore` and `.gitattributes`
+- Initial Git commit
+
+### ✅ Day 3 — Frontend UI Shell
+- **QueryInput** — natural language textarea with character count, Ctrl+Enter shortcut, example question chips
+- **SqlPreview** — syntax-highlighted SQL display (VS Code dark theme) with copy button, execution time badge, collapsible panel
+- **StatusBar** — real backend health badge (calls `/healthz`) + mocked DB / LLM badges
+- **ResultsTable** — dynamic columns and rows, horizontal scroll, alternating row colours
+- **ResultsChart** — bar / line / pie tabs powered by Recharts, auto-detects category and value columns
+- Shared TypeScript types (`QueryResult`, `QueryStatus`, `ChartType`, `ServiceStatus`)
+- Mock data shaped exactly like the real Day 4 API response
+
+### ✅ Day 4 — FastAPI Backend Routes
+- **`POST /api/v1/mcp/query`** — accepts NL question, returns stub SQL (real LLM in Day 7)
+- **`POST /api/v1/mcp/execute`** — validates SQL with sqlglot AST parser, returns stub rows (real DB in Day 5)
+- **`GET /api/v1/mcp/tools`** — returns MCP tool definitions
+- **`GET /api/v1/mcp/schema`** — returns database schema (stub → live Supabase introspection in Day 5)
+- Pydantic request/response models for all endpoints
+- Frontend wired to real API — `simulateQuery()` replaced with actual `fetch()` calls
 
 ---
 
-## Intentionally Deferred (Day 3+)
+## Intentionally Deferred
 
 | Feature | Target Day |
 |---|---|
-| Supabase connection + schema | Day 3 |
-| OpenRouter LLM integration | Day 4 |
-| Natural language → SQL translation | Day 4 |
-| AST validation + query execution | Day 5 |
-| Results table / charts | Day 6 |
-| Authentication | Day 7 |
-| Production deployment | Day 8 |
-| Evaluation framework | Day 9 |
+| Supabase tables (`mcp_queries`, `mcp_servers`, `query_audit_logs`) | Day 5 |
+| Live schema introspection from Supabase | Day 5 |
+| Real SQL execution against database | Day 5 |
+| LLM system prompt + structured output | Day 7 |
+| OpenRouter LLM SQL generation | Day 7 |
+| Schema context injection for LLM | Day 7 |
+| AST + blocklist SQL safety hardening | Day 11 |
+| Request latency / token logging middleware | Day 12 |
+| Production deployment (Vercel + Railway) | Day 13 |
+| Evaluation benchmark (20 test cases) | Day 10 |
 
 ---
 
 ## Contributing
 
-This is a personal learning project built phase by phase. Each day's work is committed separately so the git history reflects the learning journey.
+This is a personal learning project built phase by phase as part of [The Lab — 14-Day Build Roadmap](https://riwano.com/lab). Each day's work is committed separately so the git history reflects the learning journey.
