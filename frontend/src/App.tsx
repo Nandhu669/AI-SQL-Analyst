@@ -69,7 +69,7 @@ function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
-          <span style={styles.phase}>Phase 1 · Day 4</span>
+          <span style={styles.phase}>Phase 1 · Day 5</span>
         </div>
         <StatusBar />
       </header>

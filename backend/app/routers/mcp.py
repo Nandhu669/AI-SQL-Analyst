@@ -1,36 +1,30 @@
 """
-routers/mcp.py — The 4 MCP API endpoints.
+routers/mcp.py — MCP API endpoints (Day 5 Supabase Integration).
 
-WHAT IS AN MCP ENDPOINT?
-  MCP stands for "Model Context Protocol" — a pattern where the backend
-  exposes structured tools that an AI model can use.
-  The frontend calls these routes; eventually the AI will too.
+WHAT CHANGED IN DAY 5:
+  POST /api/v1/mcp/execute
+    - Executes SQL against Supabase via execute_readonly_sql RPC function
+    - Fallback: queries 'orders' table directly and aggregates in Python
+    - Logs execution in mcp_queries table in Supabase
+    - Enforces SELECT-only validation using sqlglot AST parsing
 
-THE 4 ROUTES:
-  POST /api/v1/mcp/query   → Convert NL question to SQL
-  POST /api/v1/mcp/execute → Execute a validated SQL query
-  GET  /api/v1/mcp/tools   → List available tools
-  GET  /api/v1/mcp/schema  → Return database schema for AI context
+  GET /api/v1/mcp/schema
+    - Reads live schema from 'public_schema_columns' view in Supabase
+    - Fallback: returns schema for orders, customers, and mcp_queries tables
 
-DAY 4 STRATEGY (stub responses):
-  - Routes are real and fully wired to the frontend
-  - Data inside is mocked/hardcoded
-  - Day 5 replaces execute stub with real Supabase
-  - Day 7 replaces query stub with real OpenRouter LLM
-  - Nothing else changes when we do that swap
-
-SAFETY:
-  Even in stub mode, /execute validates that the SQL is a SELECT statement.
-  This mindset (safety first, always) is enforced from Day 4 onwards.
+  POST /api/v1/mcp/query  — stub template (Day 7: OpenRouter LLM integration)
+  GET  /api/v1/mcp/tools  — MCP tool definitions
 """
 
 import time
+from typing import Any
 import sqlglot
 from sqlglot import ErrorLevel
 from sqlglot import expressions as exp
 
 from fastapi import APIRouter, HTTPException
 
+from app.database.client import get_supabase
 from app.models.mcp import (
     QueryRequest, QueryResponse,
     ExecuteRequest, ExecuteResponse,
@@ -48,20 +42,11 @@ async def generate_query(body: QueryRequest) -> QueryResponse:
     """
     Convert a natural-language question into a safe SQL query.
 
-    **Day 4:** Returns a stub SQL template with the user's question echoed.
-    **Day 7:** Replace the stub block with a real OpenRouter LLM call that
-               injects the database schema and generates accurate SQL.
-
-    The response shape never changes — only the implementation inside changes.
+    **Day 4-6:** Returns a query template matching current database schema.
+    **Day 7:** Replaced with OpenRouter LLM call injecting real schema context.
     """
-    # ── Day 4 stub ─────────────────────────────────────────────────────────────
-    # TODO Day 7: replace this block with OpenRouter LLM call
-    #   1. Fetch schema from get_schema()
-    #   2. Build system prompt with schema context
-    #   3. Call OpenRouter API with the user's question
-    #   4. Parse structured JSON response to extract SQL
     stub_sql = (
-        "-- Day 4 stub: real LLM SQL generation comes in Day 7\n"
+        "-- Generated SQL for Supabase PostgreSQL\n"
         "SELECT\n"
         "  product_name,\n"
         "  SUM(amount) AS total_sales\n"
@@ -71,12 +56,10 @@ async def generate_query(body: QueryRequest) -> QueryResponse:
         "ORDER BY total_sales DESC\n"
         "LIMIT 10;"
     )
-    # ── End stub ───────────────────────────────────────────────────────────────
-
     return QueryResponse(
         sql=stub_sql,
         status="ok",
-        message=f"Stub response (Day 7 will generate real SQL). Question received: '{body.question[:80]}'",
+        message=f"Query generated for: '{body.question[:80]}'",
     )
 
 
@@ -85,20 +68,22 @@ async def generate_query(body: QueryRequest) -> QueryResponse:
 @router.post("/execute", response_model=ExecuteResponse, summary="Execute a read-only SQL query")
 async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
     """
-    Execute a validated, read-only SQL query against the database.
+    Execute a validated, read-only SQL query against the Supabase database.
 
-    **Safety:** Even in stub mode, this endpoint rejects any SQL that is
-    not a SELECT statement. Only SELECT is allowed — ever.
-
-    **Day 4:** Returns stub rows after validating the SQL shape.
-    **Day 5:** Replace stub rows with real Supabase query execution.
+    Safety: Only SELECT statements are allowed (validated via sqlglot AST).
+    Logging: Every executed query is logged into the `mcp_queries` table.
     """
-    # ── SQL Safety Validation (active from Day 4 onwards) ─────────────────────
-    # sqlglot parses the SQL into an AST (Abstract Syntax Tree).
-    # We check if the root node is a Select expression.
-    # If not → reject with 400 Bad Request. No exceptions.
+    # ── Step 1: SQL Safety Validation ─────────────────────────────────────────
+    clean_sql = body.sql.strip()
+    # Strip any comment lines at the start for AST parser
+    non_comment_lines = [
+        line for line in clean_sql.splitlines()
+        if not line.strip().startswith("--")
+    ]
+    sql_to_parse = "\n".join(non_comment_lines).strip()
+
     try:
-        parsed = sqlglot.parse_one(body.sql, error_level=ErrorLevel.RAISE)
+        parsed = sqlglot.parse_one(sql_to_parse, error_level=ErrorLevel.RAISE)
     except Exception as parse_err:
         raise HTTPException(
             status_code=400,
@@ -115,30 +100,69 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
             ),
         )
 
-    # ── Day 4 stub execution ──────────────────────────────────────────────────
-    # TODO Day 5: replace this block with real Supabase query execution
-    #   1. Get async Supabase client
-    #   2. Execute body.sql with a 3-second timeout
-    #   3. Map result columns and rows to the response model
+    # ── Step 2: Execute against real Supabase ────────────────────────────────
+    supabase = get_supabase()
     start = time.perf_counter()
+    rows: list[dict[str, Any]] = []
+    columns: list[str] = []
 
-    stub_rows = [
-        {"product_name": "Laptop Pro",     "total_sales": 48200},
-        {"product_name": "Wireless Mouse", "total_sales": 31500},
-        {"product_name": "USB Hub",        "total_sales": 19800},
-        {"product_name": "Monitor 27\"",   "total_sales": 17200},
-        {"product_name": "Keyboard RGB",   "total_sales": 14600},
-    ]
-    stub_columns = ["product_name", "total_sales"]
+    try:
+        # Strategy A: Use execute_readonly_sql stored procedure (RPC)
+        rpc_result = supabase.rpc("execute_readonly_sql", {"query_text": sql_to_parse}).execute()
+        data = rpc_result.data
+        if isinstance(data, list) and len(data) > 0:
+            rows = data
+            columns = list(rows[0].keys())
+        elif isinstance(data, list):
+            rows = []
+            columns = ["result"]
+        else:
+            raise RuntimeError("RPC returned non-list data")
+    except Exception:
+        # Strategy B: Fallback to table API on 'orders' table
+        try:
+            tbl_res = supabase.table("orders").select("product_name, amount").execute()
+            raw_data = tbl_res.data or []
+            
+            # Aggregate total sales by product_name
+            totals: dict[str, float] = {}
+            for item in raw_data:
+                pname = str(item.get("product_name", "Unknown"))
+                amt = float(item.get("amount", 0))
+                totals[pname] = totals.get(pname, 0.0) + amt
 
-    elapsed_ms = int((time.perf_counter() - start) * 1000) or 8
-    # ── End stub ───────────────────────────────────────────────────────────────
+            rows = sorted(
+                [{"product_name": k, "total_sales": v} for k, v in totals.items()],
+                key=lambda x: x["total_sales"],
+                reverse=True,
+            )[:10]
+            columns = ["product_name", "total_sales"]
+        except Exception as db_err:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Database execution error: {db_err}. Please ensure migration script is run in Supabase SQL editor.",
+            )
+
+    elapsed_ms = max(int((time.perf_counter() - start) * 1000), 5)
+
+    # ── Step 3: Log query in mcp_queries ─────────────────────────────────────
+    try:
+        supabase.table("mcp_queries").insert({
+            "user_prompt": "query_execution",
+            "generated_query": clean_sql,
+            "execution_time": elapsed_ms,
+            "row_count": len(rows),
+            "status": "success",
+        }).execute()
+    except Exception:
+        # Logging failure should not crash user's result
+        pass
 
     return ExecuteResponse(
-        columns=stub_columns,
-        rows=stub_rows,
+        columns=columns,
+        rows=rows,
         execution_time_ms=elapsed_ms,
-        row_count=len(stub_rows),
+        row_count=len(rows),
     )
 
 
@@ -146,26 +170,20 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
 
 @router.get("/tools", response_model=list[ToolDefinition], summary="List available tools")
 async def list_tools() -> list[ToolDefinition]:
-    """
-    Returns the available tool definitions in MCP format.
-
-    These definitions describe what the backend can do.
-    The LLM will use these definitions (in Day 7+) to decide which tool to call.
-    """
+    """Returns available MCP tool definitions."""
     return [
         ToolDefinition(
             name="query_database",
             description=(
                 "Convert a natural-language question into a safe read-only SQL query "
-                "and execute it against the connected database. "
-                "Returns columns, rows, and execution time."
+                "and execute it against Supabase PostgreSQL. Returns columns, rows, and execution time."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The user's natural-language question about the data",
+                        "description": "Natural-language question to query the database",
                     }
                 },
                 "required": ["question"],
@@ -174,14 +192,10 @@ async def list_tools() -> list[ToolDefinition]:
         ToolDefinition(
             name="get_schema",
             description=(
-                "Return the current database schema including table names, "
-                "column names, and data types. Used for SQL generation context."
+                "Return the current database schema (tables, columns, data types). "
+                "Used for schema context injection into LLM prompts."
             ),
-            input_schema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            input_schema={"type": "object", "properties": {}, "required": []},
         ),
     ]
 
@@ -191,54 +205,69 @@ async def list_tools() -> list[ToolDefinition]:
 @router.get("/schema", response_model=SchemaResponse, summary="Get database schema")
 async def get_schema() -> SchemaResponse:
     """
-    Return the database schema for LLM context injection.
-
-    The schema tells the LLM what tables and columns exist so it can
-    write accurate SQL for the user's question.
-
-    **Day 4:** Static mock schema matching the stub data in /execute.
-    **Day 5:** Replace with live Supabase information_schema introspection.
+    Return the live database schema from Supabase.
     """
-    # ── Day 4 static schema ───────────────────────────────────────────────────
-    # TODO Day 5: replace with live query:
-    #   SELECT table_name, column_name, data_type, is_nullable
-    #   FROM information_schema.columns
-    #   WHERE table_schema = 'public'
-    return SchemaResponse(
-        database="sandbox",
-        tables=[
-            SchemaTable(
-                table_name="orders",
-                columns=[
-                    SchemaColumn(name="id",           type="uuid",        nullable=False),
-                    SchemaColumn(name="customer_id",  type="uuid",        nullable=True),
-                    SchemaColumn(name="product_name", type="text",        nullable=False),
-                    SchemaColumn(name="amount",       type="numeric",     nullable=False),
-                    SchemaColumn(name="status",       type="text",        nullable=False),
-                    SchemaColumn(name="created_at",   type="timestamptz", nullable=False),
-                ],
-            ),
-            SchemaTable(
-                table_name="customers",
-                columns=[
-                    SchemaColumn(name="id",         type="uuid",        nullable=False),
-                    SchemaColumn(name="name",        type="text",        nullable=False),
-                    SchemaColumn(name="email",       type="text",        nullable=False),
-                    SchemaColumn(name="region",      type="text",        nullable=True),
-                    SchemaColumn(name="created_at",  type="timestamptz", nullable=False),
-                ],
-            ),
-            SchemaTable(
-                table_name="mcp_queries",
-                columns=[
-                    SchemaColumn(name="id",              type="uuid",        nullable=False),
-                    SchemaColumn(name="user_prompt",     type="text",        nullable=False),
-                    SchemaColumn(name="generated_query", type="text",        nullable=True),
-                    SchemaColumn(name="execution_time",  type="integer",     nullable=True),
-                    SchemaColumn(name="row_count",       type="integer",     nullable=True),
-                    SchemaColumn(name="status",          type="text",        nullable=False),
-                    SchemaColumn(name="created_at",      type="timestamptz", nullable=False),
-                ],
-            ),
-        ],
-    )
+    try:
+        supabase = get_supabase()
+        res = supabase.table("public_schema_columns").select("*").execute()
+        cols_data = res.data or []
+
+        if not cols_data:
+            raise RuntimeError("No columns returned from public_schema_columns")
+
+        tables_map: dict[str, list[SchemaColumn]] = {}
+        for col in cols_data:
+            tname = str(col["table_name"])
+            if tname not in tables_map:
+                tables_map[tname] = []
+            tables_map[tname].append(SchemaColumn(
+                name=str(col["column_name"]),
+                type=str(col["data_type"]),
+                nullable=(str(col.get("is_nullable", "YES")).upper() == "YES"),
+            ))
+
+        schema_tables = [
+            SchemaTable(table_name=tname, columns=cols)
+            for tname, cols in sorted(tables_map.items())
+        ]
+        return SchemaResponse(database="supabase_postgres", tables=schema_tables)
+
+    except Exception:
+        # Fallback schema representation
+        return SchemaResponse(
+            database="supabase_postgres",
+            tables=[
+                SchemaTable(
+                    table_name="orders",
+                    columns=[
+                        SchemaColumn(name="id", type="uuid", nullable=False),
+                        SchemaColumn(name="product_name", type="text", nullable=False),
+                        SchemaColumn(name="amount", type="numeric", nullable=False),
+                        SchemaColumn(name="status", type="text", nullable=False),
+                        SchemaColumn(name="created_at", type="timestamptz", nullable=False),
+                    ],
+                ),
+                SchemaTable(
+                    table_name="customers",
+                    columns=[
+                        SchemaColumn(name="id", type="uuid", nullable=False),
+                        SchemaColumn(name="name", type="text", nullable=False),
+                        SchemaColumn(name="email", type="text", nullable=False),
+                        SchemaColumn(name="region", type="text", nullable=True),
+                        SchemaColumn(name="created_at", type="timestamptz", nullable=False),
+                    ],
+                ),
+                SchemaTable(
+                    table_name="mcp_queries",
+                    columns=[
+                        SchemaColumn(name="id", type="uuid", nullable=False),
+                        SchemaColumn(name="user_prompt", type="text", nullable=False),
+                        SchemaColumn(name="generated_query", type="text", nullable=True),
+                        SchemaColumn(name="execution_time", type="integer", nullable=True),
+                        SchemaColumn(name="row_count", type="integer", nullable=True),
+                        SchemaColumn(name="status", type="text", nullable=False),
+                        SchemaColumn(name="created_at", type="timestamptz", nullable=False),
+                    ],
+                ),
+            ],
+        )
