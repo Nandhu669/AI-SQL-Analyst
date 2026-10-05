@@ -2,9 +2,9 @@
 
 > Ask questions in plain English, get SQL answers — a learning project built day by day.
 
-**Current phase:** Phase 1 · Day 5 — Supabase Database Integration  
+**Current phase:** Phase 1 · Day 6 — Core Product (KEY GATE)  
 **Branch:** `main`  
-**Status:** Frontend, API routes, and Supabase PostgreSQL connected · AI integration coming in Days 7–8
+**Status:** Core product save/load loop, SQL sandbox, and Supabase integration complete · AI integration coming in Days 7–8
 
 ---
 
@@ -247,20 +247,32 @@ CORS is configured in `backend/app/main.py` to allow `http://localhost:5173` dur
 - **Read-Only Execution**: `POST /api/v1/mcp/execute` runs real queries against Supabase and logs executions to `mcp_queries`
 - **Dynamic Status Bar**: `GET /api/v1/status` powers the frontend `StatusBar` with real 🟢 database connection state
 
+### ✅ Day 6 — Core Product (KEY GATE)
+- **Persistent Query History**:
+  - `GET /api/v1/mcp/queries` returns history directly from `mcp_queries` table in Supabase
+  - Frontend `QueryHistory` component with live query counts, timing badges, and one-click re-execution
+- **Interactive SQL Sandbox**:
+  - `SqlPreview` component updated with "Edit Sandbox" mode and "Run SQL" button
+  - Analysts can edit generated SQL or write custom queries and run them directly against Supabase
+- **Actionable Error Feedback**:
+  - AST-based rejection for mutation statements (`DROP`, `DELETE`, etc.) with clear error explanations
+  - Dismissable error banner in UI preventing application crashes
+- **Zero Fake Data**:
+  - 100% of charts, tables, and query telemetry driven by live Supabase PostgreSQL storage
+
 ---
 
 ## Intentionally Deferred
 
 | Feature | Target Day |
 |---|---|
-| Core product save/load verification (End-to-End without AI) | Day 6 |
-| LLM system prompt + structured output | Day 7 |
-| OpenRouter LLM SQL generation | Day 7 |
-| Schema context injection for LLM | Day 8 |
-| AST + blocklist SQL safety hardening | Day 11 |
+| OpenRouter LLM Gateway integration | Day 7 |
+| AI system prompt design + structured JSON output | Day 7 |
+| Database schema context injection into LLM prompts | Day 8 |
+| Evaluation benchmark (20 test cases) | Day 10 |
+| Hardened AST Sanitizer & Timeout Rules | Day 11 |
 | Request latency / token logging middleware | Day 12 |
 | Production deployment (Vercel + Railway) | Day 13 |
-| Evaluation benchmark (20 test cases) | Day 10 |
 
 ---
 

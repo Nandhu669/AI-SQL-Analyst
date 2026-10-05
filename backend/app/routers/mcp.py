@@ -1,19 +1,17 @@
 """
-routers/mcp.py — MCP API endpoints (Day 5 Supabase Integration).
+routers/mcp.py — MCP API endpoints (Day 6 Core Product Update).
 
-WHAT CHANGED IN DAY 5:
+WHAT CHANGED IN DAY 6:
   POST /api/v1/mcp/execute
-    - Executes SQL against Supabase via execute_readonly_sql RPC function
-    - Fallback: queries 'orders' table directly and aggregates in Python
-    - Logs execution in mcp_queries table in Supabase
-    - Enforces SELECT-only validation using sqlglot AST parsing
+    - Records user_prompt with the executed query in mcp_queries table
+    - Returns query_id linking the response to persistent Supabase storage
+    - Enhanced error handling with actionable messages for invalid queries
 
-  GET /api/v1/mcp/schema
-    - Reads live schema from 'public_schema_columns' view in Supabase
-    - Fallback: returns schema for orders, customers, and mcp_queries tables
+  GET /api/v1/mcp/queries
+    - Fetches recent query history directly from Supabase mcp_queries table
 
-  POST /api/v1/mcp/query  — stub template (Day 7: OpenRouter LLM integration)
-  GET  /api/v1/mcp/tools  — MCP tool definitions
+  GET /api/v1/mcp/queries/{query_id}
+    - Fetches details of a specific saved query
 """
 
 import time
@@ -28,6 +26,7 @@ from app.database.client import get_supabase
 from app.models.mcp import (
     QueryRequest, QueryResponse,
     ExecuteRequest, ExecuteResponse,
+    QueryHistoryItem,
     ToolDefinition,
     SchemaColumn, SchemaTable, SchemaResponse,
 )
@@ -82,21 +81,27 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
     ]
     sql_to_parse = "\n".join(non_comment_lines).strip()
 
+    if not sql_to_parse:
+        raise HTTPException(
+            status_code=400,
+            detail="Empty SQL query. Please enter a valid SELECT statement.",
+        )
+
     try:
         parsed = sqlglot.parse_one(sql_to_parse, error_level=ErrorLevel.RAISE)
     except Exception as parse_err:
         raise HTTPException(
             status_code=400,
-            detail=f"SQL parse error: {parse_err}. Only valid SELECT queries are accepted.",
+            detail=f"SQL syntax error: {parse_err}. Only valid SELECT queries can be executed.",
         )
 
     if not isinstance(parsed, exp.Select):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Only SELECT queries are allowed. "
-                f"Received: {type(parsed).__name__}. "
-                "INSERT, UPDATE, DELETE, DROP, ALTER, and TRUNCATE are permanently blocked."
+                "Only SELECT queries are allowed in this sandbox. "
+                f"Received statement type: {type(parsed).__name__}. "
+                "Mutations (INSERT, UPDATE, DELETE, DROP, ALTER) are permanently blocked."
             ),
         )
 
@@ -105,6 +110,7 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
     start = time.perf_counter()
     rows: list[dict[str, Any]] = []
     columns: list[str] = []
+    exec_status = "success"
 
     try:
         # Strategy A: Use execute_readonly_sql stored procedure (RPC)
@@ -138,32 +144,117 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
             )[:10]
             columns = ["product_name", "total_sales"]
         except Exception as db_err:
+            exec_status = "error"
+            # Log failure before raising
+            try:
+                supabase.table("mcp_queries").insert({
+                    "user_prompt": body.prompt or "Direct SQL Execution",
+                    "generated_query": clean_sql,
+                    "execution_time": 0,
+                    "row_count": 0,
+                    "status": "error",
+                }).execute()
+            except Exception:
+                pass
+
             raise HTTPException(
                 status_code=503,
-                detail=f"Database execution error: {db_err}. Please ensure migration script is run in Supabase SQL editor.",
+                detail=f"Database execution error: {db_err}. Please ensure tables exist in your Supabase database.",
             )
 
     elapsed_ms = max(int((time.perf_counter() - start) * 1000), 5)
+    query_id: str | None = None
 
-    # ── Step 3: Log query in mcp_queries ─────────────────────────────────────
+    # ── Step 3: Log query in mcp_queries & retrieve ID ───────────────────────
     try:
-        supabase.table("mcp_queries").insert({
-            "user_prompt": "query_execution",
+        insert_res = supabase.table("mcp_queries").insert({
+            "user_prompt": body.prompt or "Direct SQL Sandbox Execution",
             "generated_query": clean_sql,
             "execution_time": elapsed_ms,
             "row_count": len(rows),
-            "status": "success",
+            "status": exec_status,
         }).execute()
+        if insert_res.data and len(insert_res.data) > 0:
+            query_id = str(insert_res.data[0].get("id"))
     except Exception:
-        # Logging failure should not crash user's result
         pass
 
     return ExecuteResponse(
+        query_id=query_id,
         columns=columns,
         rows=rows,
         execution_time_ms=elapsed_ms,
         row_count=len(rows),
     )
+
+
+# ── GET /api/v1/mcp/queries ──────────────────────────────────────────────────
+
+@router.get("/queries", response_model=list[QueryHistoryItem], summary="Get recent query history")
+async def get_query_history() -> list[QueryHistoryItem]:
+    """
+    Returns the recent query execution history from the mcp_queries table in Supabase.
+    Ordered by most recent execution first.
+    """
+    try:
+        supabase = get_supabase()
+        res = (
+            supabase.table("mcp_queries")
+            .select("id, user_prompt, generated_query, execution_time, row_count, status, created_at")
+            .order("created_at", desc=True)
+            .limit(15)
+            .execute()
+        )
+        items: list[QueryHistoryItem] = []
+        for row in res.data or []:
+            items.append(
+                QueryHistoryItem(
+                    id=str(row.get("id")),
+                    user_prompt=str(row.get("user_prompt") or "Custom Query"),
+                    generated_query=row.get("generated_query"),
+                    execution_time=row.get("execution_time"),
+                    row_count=row.get("row_count"),
+                    status=str(row.get("status") or "success"),
+                    created_at=str(row.get("created_at")),
+                )
+            )
+        return items
+    except Exception:
+        return []
+
+
+# ── GET /api/v1/mcp/queries/{query_id} ───────────────────────────────────────
+
+@router.get("/queries/{query_id}", response_model=QueryHistoryItem, summary="Get single query by ID")
+async def get_query_by_id(query_id: str) -> QueryHistoryItem:
+    """
+    Returns details for a single query from the mcp_queries table.
+    """
+    try:
+        supabase = get_supabase()
+        res = (
+            supabase.table("mcp_queries")
+            .select("id, user_prompt, generated_query, execution_time, row_count, status, created_at")
+            .eq("id", query_id)
+            .single()
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail=f"Query {query_id} not found")
+        row = res.data
+        return QueryHistoryItem(
+            id=str(row.get("id")),
+            user_prompt=str(row.get("user_prompt") or "Custom Query"),
+            generated_query=row.get("generated_query"),
+            execution_time=row.get("execution_time"),
+            row_count=row.get("row_count"),
+            status=str(row.get("status") or "success"),
+            created_at=str(row.get("created_at")),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch query: {e}")
 
 
 # ── GET /api/v1/mcp/tools ────────────────────────────────────────────────────

@@ -7,10 +7,10 @@ WHY PYDANTIC MODELS?
   2. Automatically generate the JSON schema shown in /docs
   3. Guarantee the response shape so the frontend always gets what it expects
 
-LEARNING NOTE:
-  Each model maps directly to one endpoint's input or output.
-  When you read the router, you can look up the model here to understand
-  exactly what data is flowing in and out.
+Day 6 Additions:
+  - user_prompt optional field in ExecuteRequest
+  - query_id field in ExecuteResponse
+  - QueryHistoryItem model for GET /api/v1/mcp/queries
 """
 
 from __future__ import annotations
@@ -37,13 +37,17 @@ class QueryRequest(BaseModel):
 class ExecuteRequest(BaseModel):
     """
     POST /api/v1/mcp/execute — sent by the frontend.
-    Contains the SQL query to run (must have been validated first).
+    Contains the SQL query to run and an optional user prompt for history tracking.
     """
     sql: str = Field(
         ...,
         min_length=1,
         description="Read-only SQL query to execute against the database",
         examples=["SELECT product_name, SUM(amount) FROM orders GROUP BY 1"],
+    )
+    prompt: str | None = Field(
+        default=None,
+        description="Optional natural-language question or note associated with this query execution",
     )
 
 
@@ -62,15 +66,27 @@ class QueryResponse(BaseModel):
 class ExecuteResponse(BaseModel):
     """
     POST /api/v1/mcp/execute — returned by the backend.
-    Contains the query results as columns + rows.
-
-    NOTE: column names and row values use snake_case here (Python convention).
-    The frontend maps execution_time_ms → executionTimeMs via the QueryResult type.
+    Contains the query results as columns + rows, plus the persistent query_id.
     """
+    query_id: str | None = Field(default=None, description="Persistent UUID of the query record in mcp_queries")
     columns: list[str] = Field(description="Column names from the result set")
     rows: list[dict[str, Any]] = Field(description="Result rows as key-value pairs")
     execution_time_ms: int = Field(description="How long the query took in milliseconds")
     row_count: int = Field(description="Total number of rows returned")
+
+
+class QueryHistoryItem(BaseModel):
+    """
+    Item returned in GET /api/v1/mcp/queries history list.
+    Mirrors a record from the mcp_queries table in Supabase.
+    """
+    id: str = Field(description="Query UUID")
+    user_prompt: str = Field(description="Natural-language question or execution label")
+    generated_query: str | None = Field(default=None, description="Executed SQL statement")
+    execution_time: int | None = Field(default=None, description="Execution duration in milliseconds")
+    row_count: int | None = Field(default=None, description="Number of rows returned")
+    status: str = Field(description="'success' or 'error'")
+    created_at: str = Field(description="ISO timestamp of when the query was executed")
 
 
 # ── Tool definitions ───────────────────────────────────────────────────────────
@@ -100,10 +116,7 @@ class SchemaTable(BaseModel):
 class SchemaResponse(BaseModel):
     """
     GET /api/v1/mcp/schema — returned by the backend.
-    Used by the LLM for schema context injection (Day 7+).
-
-    Day 4: static mock.
-    Day 5: replaced with live Supabase introspection.
+    Used by the LLM for schema context injection.
     """
     tables: list[SchemaTable]
     database: str = Field(default="sandbox", description="Database name / identifier")

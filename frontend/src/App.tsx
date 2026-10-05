@@ -1,37 +1,50 @@
 /**
  * App.tsx — Main layout and query lifecycle orchestrator.
  *
- * Day 3 responsibilities:
- *  1. Render the page header with status badges
- *  2. Render the query input box
- *  3. On submit → call simulateQuery() with a 1.5s fake delay
- *  4. On success → show SQL preview, chart, and results table
- *  5. On error → show an error state
- *
- * Day 4 change:
- *  Replace simulateQuery() with a real fetch() to POST /api/v1/mcp/query
- *  Everything else stays the same.
+ * Day 6 Responsibilities (Core Product):
+ *  1. Persistent query history panel loaded directly from Supabase
+ *  2. Interactive SQL sandbox execution for custom queries
+ *  3. Seamless reload and re-execution from query history items
+ *  4. Production-grade error handling with actionable messages
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { StatusBar } from './components/StatusBar'
 import { QueryInput } from './components/QueryInput'
 import { SqlPreview } from './components/SqlPreview'
 import { ResultsChart } from './components/ResultsChart'
 import { ResultsTable } from './components/ResultsTable'
-import { generateQuery, executeQuery } from './api/mcp'
-import type { QueryResult, QueryStatus } from './types/query'
+import { QueryHistory } from './components/QueryHistory'
+import { generateQuery, executeQuery, fetchQueryHistory } from './api/mcp'
+import type { QueryResult, QueryStatus, QueryHistoryItem } from './types/query'
 
 function App() {
   const [status, setStatus] = useState<QueryStatus>('idle')
   const [result, setResult] = useState<QueryResult | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [lastQuestion, setLastQuestion] = useState<string>('')
+  const [history, setHistory] = useState<QueryHistoryItem[]>([])
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false)
+  const [sandboxExecuting, setSandboxExecuting] = useState<boolean>(false)
 
-  // ── Query handler ───────────────────────────────────────────────────────────
-  // Day 4: two real API calls — generate SQL, then execute it
-  // Day 5: /execute returns real Supabase rows
-  // Day 7: /query returns real LLM-generated SQL
+  // ── Load history from Supabase ─────────────────────────────────────────────
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const items = await fetchQueryHistory()
+      setHistory(items)
+    } catch {
+      // Background fetch failure gracefully handled
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadHistory()
+  }, [])
+
+  // ── NL Query Handler ────────────────────────────────────────────────────────
   const handleQuery = async (question: string) => {
     setStatus('loading')
     setResult(null)
@@ -39,25 +52,91 @@ function App() {
     setLastQuestion(question)
 
     try {
-      // Step 1: generate SQL from the user's question
+      // Step 1: generate SQL template for the question
       const { sql } = await generateQuery(question)
 
-      // Step 2: execute the generated SQL
-      const execResult = await executeQuery(sql)
+      // Step 2: execute SQL against Supabase and log query
+      const execResult = await executeQuery(sql, question)
 
-      // Step 3: map backend snake_case to frontend camelCase
       const data: QueryResult = {
         sql,
         columns: execResult.columns,
         rows: execResult.rows,
         executionTimeMs: execResult.execution_time_ms,
         rowCount: execResult.row_count,
+        queryId: execResult.query_id,
+        prompt: question,
       }
 
       setResult(data)
       setStatus('success')
+      // Refresh persistent history list
+      loadHistory()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
+      const msg = err instanceof Error ? err.message : 'Unknown query execution error'
+      setErrorMsg(msg)
+      setStatus('error')
+      loadHistory()
+    }
+  }
+
+  // ── Custom SQL Sandbox Execution ────────────────────────────────────────────
+  const handleRunCustomSql = async (customSql: string) => {
+    setSandboxExecuting(true)
+    setErrorMsg('')
+
+    try {
+      const promptLabel = lastQuestion ? `Custom edit: ${lastQuestion}` : 'Sandbox Custom SQL'
+      const execResult = await executeQuery(customSql, promptLabel)
+
+      const data: QueryResult = {
+        sql: customSql,
+        columns: execResult.columns,
+        rows: execResult.rows,
+        executionTimeMs: execResult.execution_time_ms,
+        rowCount: execResult.row_count,
+        queryId: execResult.query_id,
+        prompt: promptLabel,
+      }
+
+      setResult(data)
+      setStatus('success')
+      loadHistory()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Custom SQL execution failed'
+      setErrorMsg(msg)
+      setStatus('error')
+      loadHistory()
+    } finally {
+      setSandboxExecuting(false)
+    }
+  }
+
+  // ── Select and Re-run from History ──────────────────────────────────────────
+  const handleSelectHistoryQuery = async (item: QueryHistoryItem) => {
+    if (!item.generated_query) return
+    setStatus('loading')
+    setErrorMsg('')
+    setLastQuestion(item.user_prompt)
+
+    try {
+      const execResult = await executeQuery(item.generated_query, item.user_prompt)
+
+      const data: QueryResult = {
+        sql: item.generated_query,
+        columns: execResult.columns,
+        rows: execResult.rows,
+        executionTimeMs: execResult.execution_time_ms,
+        rowCount: execResult.row_count,
+        queryId: execResult.query_id || item.id,
+        prompt: item.user_prompt,
+      }
+
+      setResult(data)
+      setStatus('success')
+      loadHistory()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to re-execute history query'
       setErrorMsg(msg)
       setStatus('error')
     }
@@ -69,15 +148,14 @@ function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
-          <span style={styles.phase}>Phase 1 · Day 5</span>
+          <span style={styles.phase}>Phase 1 · Day 6 (Core Product)</span>
         </div>
         <StatusBar />
       </header>
 
       {/* ── Main content ───────────────────────────────────────────────────── */}
       <main style={styles.main}>
-
-        {/* Query input */}
+        {/* Natural Language Query Input */}
         <section style={styles.card}>
           <QueryInput onSubmit={handleQuery} status={status} />
         </section>
@@ -87,52 +165,68 @@ function App() {
           <div style={styles.loadingBanner}>
             <span style={styles.spinner}>⏳</span>
             <div>
-              <div style={styles.loadingTitle}>Analyzing your question…</div>
-              <div style={styles.loadingSubtitle}>
-                "{lastQuestion}"
-              </div>
+              <div style={styles.loadingTitle}>Executing query against Supabase…</div>
+              <div style={styles.loadingSubtitle}>"{lastQuestion}"</div>
             </div>
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error state with action to dismiss */}
         {status === 'error' && (
           <div style={styles.errorBanner}>
-            <strong>❌ Something went wrong</strong>
+            <div style={styles.errorHeader}>
+              <strong>❌ Query Execution Error</strong>
+              <button style={styles.dismissBtn} onClick={() => setErrorMsg('')}>
+                Dismiss
+              </button>
+            </div>
             <p style={styles.errorText}>{errorMsg}</p>
           </div>
         )}
 
-        {/* Results — shown only after a successful query */}
+        {/* Results — shown on success */}
         {status === 'success' && result && (
           <>
-            {/* SQL preview */}
+            {/* Interactive SQL Preview & Sandbox */}
             <section>
-              <SqlPreview result={result} />
+              <SqlPreview
+                result={result}
+                onRunCustomSql={handleRunCustomSql}
+                running={sandboxExecuting}
+              />
             </section>
 
-            {/* Chart */}
+            {/* Visual Charts */}
             <section>
               <ResultsChart result={result} />
             </section>
 
-            {/* Table */}
+            {/* Results Table */}
             <section>
               <ResultsTable result={result} />
             </section>
           </>
         )}
 
+        {/* Persistent Query History */}
+        <section>
+          <QueryHistory
+            history={history}
+            loading={historyLoading}
+            onSelectQuery={handleSelectHistoryQuery}
+            onRefresh={loadHistory}
+          />
+        </section>
+
         {/* Idle state hint */}
         {status === 'idle' && (
           <div style={styles.idleHint}>
             <div style={styles.idleIcon}>💬</div>
             <p style={styles.idleText}>
-              Type a question above and click <strong>Analyze</strong> to see the
-              generated SQL, chart, and data table.
+              Type a question above or pick a query from the <strong>Saved Query History</strong> to inspect and visualize data.
             </p>
             <p style={styles.idleNote}>
-              Day 3 uses mock data — real AI + database comes in Days 4–8.
+              Day 6 Core Product: 100% real Supabase PostgreSQL data · persistent query logs · editable SQL sandbox.
             </p>
           </div>
         )}
@@ -148,7 +242,7 @@ export default App
 const styles: Record<string, React.CSSProperties> = {
   page: {
     fontFamily: "'Segoe UI', system-ui, sans-serif",
-    maxWidth: 860,
+    maxWidth: 920,
     margin: '0 auto',
     padding: '0 20px 60px',
     color: '#1a1a1a',
@@ -184,7 +278,7 @@ const styles: Record<string, React.CSSProperties> = {
   main: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 16,
+    gap: 18,
   },
   card: {
     border: '1px solid #e5e7eb',
@@ -203,7 +297,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   spinner: {
     fontSize: '1.5rem',
-    animation: 'spin 1s linear infinite',
   },
   loadingTitle: {
     fontWeight: 600,
@@ -223,9 +316,24 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     color: '#991b1b',
   },
+  errorHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dismissBtn: {
+    fontSize: '0.75rem',
+    background: 'none',
+    border: '1px solid #fca5a5',
+    padding: '2px 8px',
+    borderRadius: 4,
+    color: '#991b1b',
+    cursor: 'pointer',
+  },
   errorText: {
     margin: '6px 0 0',
     fontSize: '0.875rem',
+    lineHeight: 1.4,
   },
   idleHint: {
     padding: '40px 20px',
