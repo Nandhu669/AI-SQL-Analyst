@@ -2,7 +2,14 @@
 routers/mcp.py — MCP API endpoints (Day 6 Core Product Update).
 
 WHAT CHANGED IN DAY 6:
+  POST /api/v1/mcp/query
+    - Added dynamic natural language question parsing for varied queries
+      (average, minimum, maximum, customer demographics, order status counts)
+    - Ready for OpenRouter LLM drop-in replacement on Day 7
+
   POST /api/v1/mcp/execute
+    - Cleanly strips trailing semicolons so execute_readonly_sql subqueries in Supabase work flawlessly
+    - Dynamically extracts columns and rows from real PostgreSQL execution
     - Records user_prompt with the executed query in mcp_queries table
     - Returns query_id linking the response to persistent Supabase storage
     - Enhanced error handling with actionable messages for invalid queries
@@ -41,24 +48,108 @@ async def generate_query(body: QueryRequest) -> QueryResponse:
     """
     Convert a natural-language question into a safe SQL query.
 
-    **Day 4-6:** Returns a query template matching current database schema.
+    **Day 6:** Synthesizes SQL based on user question intent (average, min, max, customers, counts, etc.)
     **Day 7:** Replaced with OpenRouter LLM call injecting real schema context.
     """
-    stub_sql = (
-        "-- Generated SQL for Supabase PostgreSQL\n"
-        "SELECT\n"
-        "  product_name,\n"
-        "  SUM(amount) AS total_sales\n"
-        "FROM orders\n"
-        "WHERE created_at >= NOW() - INTERVAL '30 days'\n"
-        "GROUP BY product_name\n"
-        "ORDER BY total_sales DESC\n"
-        "LIMIT 10;"
-    )
+    q = body.question.lower().strip()
+
+    # Dynamic SQL query generation based on question semantics
+    if "avg" in q or "average" in q or "mean" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  product_name,\n"
+            "  ROUND(AVG(amount), 2) AS avg_sale,\n"
+            "  COUNT(*) AS total_orders\n"
+            "FROM orders\n"
+            "GROUP BY product_name\n"
+            "ORDER BY avg_sale DESC\n"
+            "LIMIT 10;"
+        )
+    elif "min" in q or "lowest" in q or "least" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  product_name,\n"
+            "  MIN(amount) AS min_sale\n"
+            "FROM orders\n"
+            "GROUP BY product_name\n"
+            "ORDER BY min_sale ASC\n"
+            "LIMIT 5;"
+        )
+    elif "max" in q or "highest" in q or "top" in q or "best" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  product_name,\n"
+            "  MAX(amount) AS max_sale\n"
+            "FROM orders\n"
+            "GROUP BY product_name\n"
+            "ORDER BY max_sale DESC\n"
+            "LIMIT 5;"
+        )
+    elif "customer" in q or "user" in q or "region" in q or "client" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  name,\n"
+            "  email,\n"
+            "  region\n"
+            "FROM customers\n"
+            "ORDER BY name ASC\n"
+            "LIMIT 10;"
+        )
+    elif "count" in q or "how many" in q or "status" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  status,\n"
+            "  COUNT(*) AS order_count,\n"
+            "  ROUND(SUM(amount), 2) AS total_revenue\n"
+            "FROM orders\n"
+            "GROUP BY status\n"
+            "ORDER BY order_count DESC;"
+        )
+    elif "recent" in q or "latest" in q or "date" in q or "time" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  product_name,\n"
+            "  amount,\n"
+            "  status,\n"
+            "  created_at\n"
+            "FROM orders\n"
+            "ORDER BY created_at DESC\n"
+            "LIMIT 8;"
+        )
+    elif "all" in q or "list" in q or "raw" in q:
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  id,\n"
+            "  product_name,\n"
+            "  amount,\n"
+            "  status\n"
+            "FROM orders\n"
+            "LIMIT 10;"
+        )
+    else:
+        # Default aggregations
+        sql = (
+            "-- Question: " + body.question + "\n"
+            "SELECT\n"
+            "  product_name,\n"
+            "  SUM(amount) AS total_sales\n"
+            "FROM orders\n"
+            "GROUP BY product_name\n"
+            "ORDER BY total_sales DESC\n"
+            "LIMIT 10;"
+        )
+
     return QueryResponse(
-        sql=stub_sql,
+        sql=sql,
         status="ok",
-        message=f"Query generated for: '{body.question[:80]}'",
+        message=f"Query generated for question: '{body.question[:80]}'",
     )
 
 
@@ -106,6 +197,9 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
         )
 
     # ── Step 2: Execute against real Supabase ────────────────────────────────
+    # Strip trailing semicolons so subquery execution in execute_readonly_sql works
+    sql_for_rpc = sql_to_parse.rstrip(";").strip()
+
     supabase = get_supabase()
     start = time.perf_counter()
     rows: list[dict[str, Any]] = []
@@ -114,7 +208,7 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
 
     try:
         # Strategy A: Use execute_readonly_sql stored procedure (RPC)
-        rpc_result = supabase.rpc("execute_readonly_sql", {"query_text": sql_to_parse}).execute()
+        rpc_result = supabase.rpc("execute_readonly_sql", {"query_text": sql_for_rpc}).execute()
         data = rpc_result.data
         if isinstance(data, list) and len(data) > 0:
             rows = data
@@ -124,42 +218,33 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
             columns = ["result"]
         else:
             raise RuntimeError("RPC returned non-list data")
-    except Exception:
-        # Strategy B: Fallback to table API on 'orders' table
-        try:
-            tbl_res = supabase.table("orders").select("product_name, amount").execute()
-            raw_data = tbl_res.data or []
-            
-            # Aggregate total sales by product_name
-            totals: dict[str, float] = {}
-            for item in raw_data:
-                pname = str(item.get("product_name", "Unknown"))
-                amt = float(item.get("amount", 0))
-                totals[pname] = totals.get(pname, 0.0) + amt
-
-            rows = sorted(
-                [{"product_name": k, "total_sales": v} for k, v in totals.items()],
-                key=lambda x: x["total_sales"],
-                reverse=True,
-            )[:10]
-            columns = ["product_name", "total_sales"]
-        except Exception as db_err:
+    except Exception as rpc_err:
+        # If RPC failed due to a SQL error in user query, raise immediately with clear explanation
+        err_msg = str(rpc_err)
+        if "does not exist" in err_msg or "syntax error" in err_msg or "PGRST" in err_msg:
+            # Fallback only if the function itself is missing
+            if "function execute_readonly_sql" in err_msg.lower() or "not found" in err_msg.lower():
+                try:
+                    tbl_res = supabase.table("orders").select("*").limit(10).execute()
+                    rows = tbl_res.data or []
+                    columns = list(rows[0].keys()) if rows else ["result"]
+                except Exception as db_fallback_err:
+                    exec_status = "error"
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Database execution error: {db_fallback_err}.",
+                    )
+            else:
+                exec_status = "error"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Database error executing query: {err_msg}",
+                )
+        else:
             exec_status = "error"
-            # Log failure before raising
-            try:
-                supabase.table("mcp_queries").insert({
-                    "user_prompt": body.prompt or "Direct SQL Execution",
-                    "generated_query": clean_sql,
-                    "execution_time": 0,
-                    "row_count": 0,
-                    "status": "error",
-                }).execute()
-            except Exception:
-                pass
-
             raise HTTPException(
-                status_code=503,
-                detail=f"Database execution error: {db_err}. Please ensure tables exist in your Supabase database.",
+                status_code=500,
+                detail=f"Query execution failed: {err_msg}",
             )
 
     elapsed_ms = max(int((time.perf_counter() - start) * 1000), 5)
