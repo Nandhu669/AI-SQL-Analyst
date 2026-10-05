@@ -2,9 +2,9 @@
 
 > Ask questions in plain English, get SQL answers — a learning project built day by day.
 
-**Current phase:** Phase 1 · Day 4 — FastAPI Backend Routes  
+**Current phase:** Phase 1 · Day 5 — Supabase Database Integration  
 **Branch:** `main`  
-**Status:** Frontend UI shell + real API routes complete · Database & AI integration coming in Days 5–8
+**Status:** Frontend, API routes, and Supabase PostgreSQL connected · AI integration coming in Days 7–8
 
 ---
 
@@ -23,7 +23,7 @@ This tool lets users describe a data question in natural language (e.g. *"Show m
 | SQL Parser | sqlglot | ✅ Day 4 |
 | Charts | Recharts | ✅ Day 3 |
 | SQL Highlighting | react-syntax-highlighter | ✅ Day 3 |
-| Database | Supabase PostgreSQL | 🔜 Day 5 |
+| Database | Supabase PostgreSQL | ✅ Day 5 |
 | LLM Gateway | OpenRouter | 🔜 Day 7 |
 | Frontend Deploy | Vercel | 🔜 Day 13 |
 | Backend Deploy | Railway | 🔜 Day 13 |
@@ -230,11 +230,22 @@ CORS is configured in `backend/app/main.py` to allow `http://localhost:5173` dur
 
 ### ✅ Day 4 — FastAPI Backend Routes
 - **`POST /api/v1/mcp/query`** — accepts NL question, returns stub SQL (real LLM in Day 7)
-- **`POST /api/v1/mcp/execute`** — validates SQL with sqlglot AST parser, returns stub rows (real DB in Day 5)
+- **`POST /api/v1/mcp/execute`** — validates SQL with sqlglot AST parser, returns stub rows
 - **`GET /api/v1/mcp/tools`** — returns MCP tool definitions
-- **`GET /api/v1/mcp/schema`** — returns database schema (stub → live Supabase introspection in Day 5)
+- **`GET /api/v1/mcp/schema`** — returns database schema
 - Pydantic request/response models for all endpoints
 - Frontend wired to real API — `simulateQuery()` replaced with actual `fetch()` calls
+
+### ✅ Day 5 — Supabase Database Integration
+- **Supabase Client**: Configured `supabase==2.32.0` singleton client in FastAPI
+- **Database Schema**: 
+  - `mcp_queries` — records query prompts, SQL, timing, and row count
+  - `mcp_servers` — tracks backend tool servers and status
+  - `query_audit_logs` — captures SQL safety validation logs
+  - `orders` & `customers` — sample data tables with 10 orders and 5 customers
+- **Schema Introspection**: `public_schema_columns` view provides live metadata to `GET /api/v1/mcp/schema`
+- **Read-Only Execution**: `POST /api/v1/mcp/execute` runs real queries against Supabase and logs executions to `mcp_queries`
+- **Dynamic Status Bar**: `GET /api/v1/status` powers the frontend `StatusBar` with real 🟢 database connection state
 
 ---
 
@@ -242,12 +253,10 @@ CORS is configured in `backend/app/main.py` to allow `http://localhost:5173` dur
 
 | Feature | Target Day |
 |---|---|
-| Supabase tables (`mcp_queries`, `mcp_servers`, `query_audit_logs`) | Day 5 |
-| Live schema introspection from Supabase | Day 5 |
-| Real SQL execution against database | Day 5 |
+| Core product save/load verification (End-to-End without AI) | Day 6 |
 | LLM system prompt + structured output | Day 7 |
 | OpenRouter LLM SQL generation | Day 7 |
-| Schema context injection for LLM | Day 7 |
+| Schema context injection for LLM | Day 8 |
 | AST + blocklist SQL safety hardening | Day 11 |
 | Request latency / token logging middleware | Day 12 |
 | Production deployment (Vercel + Railway) | Day 13 |
