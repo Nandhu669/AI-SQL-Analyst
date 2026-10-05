@@ -4,17 +4,12 @@ routers/status.py — System status endpoint.
 GET /api/v1/status returns the connection state of all 3 services:
   - backend: always "ok" if this endpoint responds
   - database: checks Supabase connectivity via a lightweight query
-  - llm: "not_configured" until Day 7 adds OpenRouter
-
-WHY A SEPARATE STATUS ENDPOINT?
-  The frontend StatusBar needs to know all 3 service states at once.
-  Instead of 3 separate calls, one call to /api/v1/status returns everything.
-  This is simpler, faster, and more reliable for the frontend badge display.
+  - llm: checks OpenRouter connectivity via check_openrouter_health()
 """
 
 from fastapi import APIRouter
 from app.database.client import check_connection
-from app.config import get_settings
+from app.ai.client import check_openrouter_health
 
 router = APIRouter(prefix="/api/v1", tags=["Status"])
 
@@ -23,21 +18,14 @@ router = APIRouter(prefix="/api/v1", tags=["Status"])
 async def get_status() -> dict:
     """
     Returns the connection state of backend, database, and LLM.
-
     Used by the frontend StatusBar to show 🟢/🔴 badges.
-
-    Possible values:
-      backend:  "ok" | "error"
-      database: "connected" | "disconnected"
-      llm:      "connected" | "not_configured"
     """
-    settings = get_settings()
-
     # Check database
     db_status = "connected" if check_connection() else "disconnected"
 
-    # Check LLM (Day 7: replace with real OpenRouter ping)
-    llm_status = "connected" if settings.openrouter_api_key else "not_configured"
+    # Check OpenRouter LLM Gateway
+    is_llm_healthy = await check_openrouter_health()
+    llm_status = "connected" if is_llm_healthy else "disconnected"
 
     return {
         "backend": "ok",

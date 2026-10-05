@@ -2,9 +2,9 @@
 
 > Ask questions in plain English, get SQL answers — a learning project built day by day.
 
-**Current phase:** Phase 1 · Day 6 — Core Product (KEY GATE)  
+**Current phase:** Phase 2 · Day 7 — AI Fundamentals (OpenRouter LLM Integration)  
 **Branch:** `main`  
-**Status:** Core product save/load loop, SQL sandbox, and Supabase integration complete · AI integration coming in Days 7–8
+**Status:** Full AI-to-SQL generation pipeline online with OpenRouter free-tier models & Supabase PostgreSQL
 
 ---
 
@@ -24,7 +24,7 @@ This tool lets users describe a data question in natural language (e.g. *"Show m
 | Charts | Recharts | ✅ Day 3 |
 | SQL Highlighting | react-syntax-highlighter | ✅ Day 3 |
 | Database | Supabase PostgreSQL | ✅ Day 5 |
-| LLM Gateway | OpenRouter | 🔜 Day 7 |
+| LLM Gateway | OpenRouter (Free Tier Models) | ✅ Day 7 |
 | Frontend Deploy | Vercel | 🔜 Day 13 |
 | Backend Deploy | Railway | 🔜 Day 13 |
 
@@ -260,17 +260,29 @@ CORS is configured in `backend/app/main.py` to allow `http://localhost:5173` dur
 - **Zero Fake Data**:
   - 100% of charts, tables, and query telemetry driven by live Supabase PostgreSQL storage
 
+### ✅ Day 7 — AI Fundamentals (OpenRouter LLM Integration)
+- **OpenRouter Gateway**:
+  - Integrated asynchronous OpenRouter client using free-tier models (`:free` suffix) with automatic failover
+  - Validated models include `meta-llama/llama-3.3-70b-instruct:free`, `nvidia/nemotron-3.5-lightning:free`, and `qwen/qwen3.8-27b:free`
+- **System Prompt Engineering**:
+  - Layered architecture: Persona, Schema injection, strict read-only constraints, and few-shot examples
+- **Structured Output Parser**:
+  - Robust JSON extraction handling model reasoning traces and markdown code fences
+  - Enforces `{ "sql": "...", "explanation": "..." }` response contract
+- **Real-Time AI Status & UI Reasoning**:
+  - `GET /api/v1/status` checks live OpenRouter health, illuminating the **LLM** badge to **🟢 Connected**
+  - Frontend UI displays the model's reasoning/explanation alongside generated SQL and live charts
+
 ---
 
 ## Intentionally Deferred
 
 | Feature | Target Day |
 |---|---|
-| OpenRouter LLM Gateway integration | Day 7 |
-| AI system prompt design + structured JSON output | Day 7 |
-| Database schema context injection into LLM prompts | Day 8 |
-| Evaluation benchmark (20 test cases) | Day 10 |
-| Hardened AST Sanitizer & Timeout Rules | Day 11 |
+| End-to-end AI schema injection & evaluation gate | Day 8 |
+| Auto-retry on rate limits, safe fallback on bad responses | Day 9 |
+| Evaluation benchmark (20 test cases, 100% accuracy target) | Day 10 |
+| Hardened AST Sanitizer & 3-Second Timeout Rules | Day 11 |
 | Request latency / token logging middleware | Day 12 |
 | Production deployment (Vercel + Railway) | Day 13 |
 

@@ -26,6 +26,7 @@ function App() {
   const [history, setHistory] = useState<QueryHistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState<boolean>(false)
   const [sandboxExecuting, setSandboxExecuting] = useState<boolean>(false)
+  const [aiExplanation, setAiExplanation] = useState<string>('')
 
   // ── Load history from Supabase ─────────────────────────────────────────────
   const loadHistory = async () => {
@@ -49,11 +50,13 @@ function App() {
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
+    setAiExplanation('')
     setLastQuestion(question)
 
     try {
-      // Step 1: generate SQL template for the question
-      const { sql } = await generateQuery(question)
+      // Step 1: generate SQL using OpenRouter AI
+      const { sql, message } = await generateQuery(question)
+      setAiExplanation(message)
 
       // Step 2: execute SQL against Supabase and log query
       const execResult = await executeQuery(sql, question)
@@ -148,7 +151,7 @@ function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>🤖 AI SQL Analyst</h1>
-          <span style={styles.phase}>Phase 1 · Day 6 (Core Product)</span>
+          <span style={styles.phase}>Phase 2 · Day 7 (AI Integration)</span>
         </div>
         <StatusBar />
       </header>
@@ -165,7 +168,7 @@ function App() {
           <div style={styles.loadingBanner}>
             <span style={styles.spinner}>⏳</span>
             <div>
-              <div style={styles.loadingTitle}>Executing query against Supabase…</div>
+              <div style={styles.loadingTitle}>Generating SQL with OpenRouter AI & Executing…</div>
               <div style={styles.loadingSubtitle}>"{lastQuestion}"</div>
             </div>
           </div>
@@ -187,6 +190,13 @@ function App() {
         {/* Results — shown on success */}
         {status === 'success' && result && (
           <>
+            {aiExplanation && (
+              <div style={styles.aiExplanationCard}>
+                <span style={styles.aiBadge}>🧠 AI Reasoning</span>
+                <p style={styles.aiText}>{aiExplanation}</p>
+              </div>
+            )}
+
             {/* Interactive SQL Preview & Sandbox */}
             <section>
               <SqlPreview
@@ -355,5 +365,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#9ca3af',
     fontSize: '0.82rem',
     margin: 0,
+  },
+  aiExplanationCard: {
+    background: '#f5f3ff',
+    border: '1px solid #ddd6fe',
+    borderRadius: 8,
+    padding: '12px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  aiBadge: {
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    color: '#6d28d9',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  aiText: {
+    margin: 0,
+    fontSize: '0.875rem',
+    color: '#4c1d95',
+    lineHeight: 1.5,
   },
 }

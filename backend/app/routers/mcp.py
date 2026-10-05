@@ -30,6 +30,7 @@ from sqlglot import expressions as exp
 from fastapi import APIRouter, HTTPException
 
 from app.database.client import get_supabase
+from app.ai.generator import generate_sql_from_question
 from app.models.mcp import (
     QueryRequest, QueryResponse,
     ExecuteRequest, ExecuteResponse,
@@ -46,111 +47,125 @@ router = APIRouter(prefix="/api/v1/mcp", tags=["MCP"])
 @router.post("/query", response_model=QueryResponse, summary="Convert NL question to SQL")
 async def generate_query(body: QueryRequest) -> QueryResponse:
     """
-    Convert a natural-language question into a safe SQL query.
-
-    **Day 6:** Synthesizes SQL based on user question intent (average, min, max, customers, counts, etc.)
-    **Day 7:** Replaced with OpenRouter LLM call injecting real schema context.
+    Convert a natural-language question into a safe SQL query using OpenRouter AI.
     """
-    q = body.question.lower().strip()
+    # ── Strategy 1: Real AI Generation via OpenRouter ─────────────────────────
+    try:
+        schema = await get_schema()
+        sql, explanation = await generate_sql_from_question(body.question, schema.tables)
+        return QueryResponse(
+            sql=sql,
+            status="ok",
+            message=explanation,
+        )
+    except Exception as ai_err:
+        # ── Strategy 2: Graceful Semantic Fallback ────────────────────────────
+        q = body.question.lower().strip()
 
-    # Dynamic SQL query generation based on question semantics
-    if "avg" in q or "average" in q or "mean" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  product_name,\n"
-            "  ROUND(AVG(amount), 2) AS avg_sale,\n"
-            "  COUNT(*) AS total_orders\n"
-            "FROM orders\n"
-            "GROUP BY product_name\n"
-            "ORDER BY avg_sale DESC\n"
-            "LIMIT 10;"
-        )
-    elif "min" in q or "lowest" in q or "least" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  product_name,\n"
-            "  MIN(amount) AS min_sale\n"
-            "FROM orders\n"
-            "GROUP BY product_name\n"
-            "ORDER BY min_sale ASC\n"
-            "LIMIT 5;"
-        )
-    elif "max" in q or "highest" in q or "top" in q or "best" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  product_name,\n"
-            "  MAX(amount) AS max_sale\n"
-            "FROM orders\n"
-            "GROUP BY product_name\n"
-            "ORDER BY max_sale DESC\n"
-            "LIMIT 5;"
-        )
-    elif "customer" in q or "user" in q or "region" in q or "client" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  name,\n"
-            "  email,\n"
-            "  region\n"
-            "FROM customers\n"
-            "ORDER BY name ASC\n"
-            "LIMIT 10;"
-        )
-    elif "count" in q or "how many" in q or "status" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  status,\n"
-            "  COUNT(*) AS order_count,\n"
-            "  ROUND(SUM(amount), 2) AS total_revenue\n"
-            "FROM orders\n"
-            "GROUP BY status\n"
-            "ORDER BY order_count DESC;"
-        )
-    elif "recent" in q or "latest" in q or "date" in q or "time" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  product_name,\n"
-            "  amount,\n"
-            "  status,\n"
-            "  created_at\n"
-            "FROM orders\n"
-            "ORDER BY created_at DESC\n"
-            "LIMIT 8;"
-        )
-    elif "all" in q or "list" in q or "raw" in q:
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  id,\n"
-            "  product_name,\n"
-            "  amount,\n"
-            "  status\n"
-            "FROM orders\n"
-            "LIMIT 10;"
-        )
-    else:
-        # Default aggregations
-        sql = (
-            "-- Question: " + body.question + "\n"
-            "SELECT\n"
-            "  product_name,\n"
-            "  SUM(amount) AS total_sales\n"
-            "FROM orders\n"
-            "GROUP BY product_name\n"
-            "ORDER BY total_sales DESC\n"
-            "LIMIT 10;"
-        )
+        if "avg" in q or "average" in q or "mean" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  product_name,\n"
+                "  ROUND(AVG(amount), 2) AS avg_sale,\n"
+                "  COUNT(*) AS total_orders\n"
+                "FROM orders\n"
+                "GROUP BY product_name\n"
+                "ORDER BY avg_sale DESC\n"
+                "LIMIT 10;"
+            )
+            explanation = "Calculates average order amount per product."
+        elif "min" in q or "lowest" in q or "least" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  product_name,\n"
+                "  MIN(amount) AS min_sale\n"
+                "FROM orders\n"
+                "GROUP BY product_name\n"
+                "ORDER BY min_sale ASC\n"
+                "LIMIT 5;"
+            )
+            explanation = "Calculates minimum sale amount per product."
+        elif "max" in q or "highest" in q or "top" in q or "best" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  product_name,\n"
+                "  MAX(amount) AS max_sale\n"
+                "FROM orders\n"
+                "GROUP BY product_name\n"
+                "ORDER BY max_sale DESC\n"
+                "LIMIT 5;"
+            )
+            explanation = "Calculates maximum sale amount per product."
+        elif "customer" in q or "user" in q or "region" in q or "client" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  name,\n"
+                "  email,\n"
+                "  region\n"
+                "FROM customers\n"
+                "ORDER BY name ASC\n"
+                "LIMIT 10;"
+            )
+            explanation = "Lists customer records."
+        elif "count" in q or "how many" in q or "status" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  status,\n"
+                "  COUNT(*) AS order_count,\n"
+                "  ROUND(SUM(amount), 2) AS total_revenue\n"
+                "FROM orders\n"
+                "GROUP BY status\n"
+                "ORDER BY order_count DESC;"
+            )
+            explanation = "Aggregates order counts by status."
+        elif "recent" in q or "latest" in q or "date" in q or "time" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  product_name,\n"
+                "  amount,\n"
+                "  status,\n"
+                "  created_at\n"
+                "FROM orders\n"
+                "ORDER BY created_at DESC\n"
+                "LIMIT 8;"
+            )
+            explanation = "Retrieves recent orders ordered by creation date."
+        elif "all" in q or "list" in q or "raw" in q:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  id,\n"
+                "  product_name,\n"
+                "  amount,\n"
+                "  status\n"
+                "FROM orders\n"
+                "LIMIT 10;"
+            )
+            explanation = "Lists orders."
+        else:
+            sql = (
+                "-- Question: " + body.question + "\n"
+                "SELECT\n"
+                "  product_name,\n"
+                "  SUM(amount) AS total_sales\n"
+                "FROM orders\n"
+                "GROUP BY product_name\n"
+                "ORDER BY total_sales DESC\n"
+                "LIMIT 10;"
+            )
+            explanation = "Calculates total sales per product."
 
-    return QueryResponse(
-        sql=sql,
-        status="ok",
-        message=f"Query generated for question: '{body.question[:80]}'",
-    )
+        return QueryResponse(
+            sql=sql,
+            status="ok",
+            message=f"{explanation} (Note: AI fallback used due to: {ai_err})",
+        )
 
 
 # ── POST /api/v1/mcp/execute ──────────────────────────────────────────────────
