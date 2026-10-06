@@ -1,18 +1,14 @@
 /**
- * ResultsChart.tsx — Visualizes query results as Bar, Line, or Pie charts.
+ * ResultsChart.tsx — Adaptive multi-metric visualization component.
  *
- * Uses Recharts — a React-native charting library with TypeScript support.
- *
- * Logic:
- *  - Auto-detects the first string column as the category axis (X / label)
- *  - Auto-detects the first numeric column as the value axis (Y / value)
- *  - Renders the selected chart type based on tab selection
- *
- * Day 3: receives mock rows
- * Day 4+: receives real rows from the API
+ * Impeccable Craft Standards:
+ *  - Crisp SVG icons (lucide-react), zero unicode emoji
+ *  - Dynamic axis & metric dimension selection
+ *  - Accessible dark-slate theme tooltips & gridlines
+ *  - Formatted currencies, percentages, and integer ticks
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   BarChart, Bar,
   LineChart, Line,
@@ -20,184 +16,333 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { BarChart3, LineChart as LineIcon, PieChart as PieIcon, SlidersHorizontal } from 'lucide-react'
 import type { QueryResult, ChartType } from '../types/query'
 
 interface ResultsChartProps {
   result: QueryResult
 }
 
-// A palette of colours for the pie chart slices / bars
-const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2']
+const PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6']
 
 export function ResultsChart({ result }: ResultsChartProps) {
   const [chartType, setChartType] = useState<ChartType>('bar')
 
   const { columns, rows } = result
 
-  // ── Auto-detect axes ────────────────────────────────────────────────────────
-  // Category (X axis / pie label): first column with string values
-  // Value (Y axis / pie value): first column with numeric values
+  // ── Auto-discover numeric and string columns ─────────────────────────────────
+  const { numericCols, stringCols } = useMemo(() => {
+    const numCols: string[] = []
+    const strCols: string[] = []
 
-  const categoryKey = columns.find((col) =>
-    rows.some((r) => typeof r[col] === 'string')
-  ) ?? columns[0]
+    columns.forEach((col) => {
+      const hasNumber = rows.some((r) => typeof r[col] === 'number')
+      const hasString = rows.some((r) => typeof r[col] === 'string')
 
-  const valueKey = columns.find((col) =>
-    rows.some((r) => typeof r[col] === 'number')
-  ) ?? columns[1]
+      if (hasNumber) numCols.push(col)
+      else if (hasString) strCols.push(col)
+    })
 
-  // Recharts needs plain objects — our rows already are, just type-cast
-  const data = rows as Record<string, unknown>[]
+    return { numericCols: numCols, stringCols: strCols }
+  }, [columns, rows])
 
-  // ── Chart renderers ─────────────────────────────────────────────────────────
+  const [selectedCategory, setSelectedCategory] = useState<string>(stringCols[0] ?? columns[0] ?? '')
+  const [selectedValue, setSelectedValue] = useState<string>(numericCols[0] ?? columns[1] ?? '')
 
-  const renderChart = () => {
-    switch (chartType) {
-      case 'bar':
-        return (
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 48 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis
-                dataKey={categoryKey}
-                tick={{ fontSize: 12 }}
-                angle={-30}
-                textAnchor="end"
-                interval={0}
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Bar dataKey={valueKey} fill={COLORS[0]} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )
+  // Keep state updated if columns change
+  const activeCategory = stringCols.includes(selectedCategory) ? selectedCategory : (stringCols[0] ?? columns[0])
+  const activeValue = numericCols.includes(selectedValue) ? selectedValue : (numericCols[0] ?? columns[1])
 
-      case 'line':
-        return (
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 48 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis
-                dataKey={categoryKey}
-                tick={{ fontSize: 12 }}
-                angle={-30}
-                textAnchor="end"
-                interval={0}
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Line
-                type="monotone"
-                dataKey={valueKey}
-                stroke={COLORS[0]}
-                strokeWidth={2}
-                dot={{ r: 4 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        )
-
-      case 'pie':
-        return (
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey={valueKey}
-                nameKey={categoryKey}
-                cx="50%"
-                cy="50%"
-                outerRadius={100}
-                label={({ name, percent }) =>
-                  `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`
-                }
-                labelLine={true}
-              >
-                {data.map((_, index) => (
-                  <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        )
-    }
+  if (!numericCols.length || rows.length === 0) {
+    return (
+      <div style={styles.emptyContainer}>
+        <span style={styles.emptyText}>
+          No numeric metrics detected in this dataset to plot on a chart. Switch to the Data Table view to inspect records.
+        </span>
+      </div>
+    )
   }
 
+  // Format tick numbers nicely
+  const formatTick = (val: unknown) => {
+    if (typeof val === 'number') {
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`
+      if (val >= 1000) return `${(val / 1000).toFixed(1)}k`
+      return val.toLocaleString()
+    }
+    return String(val ?? '')
+  }
+
+  const data = rows as Record<string, unknown>[]
+
   return (
-    <div style={styles.container}>
-      {/* Tab bar */}
+    <div style={styles.card}>
+      {/* Header with Type Switcher & Axis Selectors */}
       <div style={styles.header}>
-        <span style={styles.title}>Visualization</span>
-        <div style={styles.tabs}>
-          {(['bar', 'line', 'pie'] as ChartType[]).map((type) => (
+        <div style={styles.headerLeft}>
+          <div style={styles.chartTypeGroup}>
             <button
-              key={type}
               style={{
-                ...styles.tab,
-                ...(chartType === type ? styles.tabActive : {}),
+                ...styles.typeBtn,
+                backgroundColor: chartType === 'bar' ? 'var(--accent-primary-subtle)' : 'transparent',
+                borderColor: chartType === 'bar' ? 'var(--accent-primary-border)' : 'var(--border-subtle)',
+                color: chartType === 'bar' ? 'var(--accent-primary)' : 'var(--text-secondary)',
               }}
-              onClick={() => setChartType(type)}
+              onClick={() => setChartType('bar')}
+              title="Bar Chart"
             >
-              {type === 'bar' ? '📊' : type === 'line' ? '📈' : '🥧'}{' '}
-              {type.charAt(0).toUpperCase() + type.slice(1)}
+              <BarChart3 size={13} />
+              <span>Bar</span>
             </button>
-          ))}
+
+            <button
+              style={{
+                ...styles.typeBtn,
+                backgroundColor: chartType === 'line' ? 'var(--accent-primary-subtle)' : 'transparent',
+                borderColor: chartType === 'line' ? 'var(--accent-primary-border)' : 'var(--border-subtle)',
+                color: chartType === 'line' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              }}
+              onClick={() => setChartType('line')}
+              title="Line Chart"
+            >
+              <LineIcon size={13} />
+              <span>Line</span>
+            </button>
+
+            <button
+              style={{
+                ...styles.typeBtn,
+                backgroundColor: chartType === 'pie' ? 'var(--accent-primary-subtle)' : 'transparent',
+                borderColor: chartType === 'pie' ? 'var(--accent-primary-border)' : 'var(--border-subtle)',
+                color: chartType === 'pie' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              }}
+              onClick={() => setChartType('pie')}
+              title="Pie Chart"
+            >
+              <PieIcon size={13} />
+              <span>Pie</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Metric & Dimension Selectors */}
+        <div style={styles.headerRight}>
+          <div style={styles.selectorGroup}>
+            <SlidersHorizontal size={11} style={{ color: 'var(--text-muted)' }} />
+            <label style={styles.selectorLabel}>X:</label>
+            <select
+              style={styles.select}
+              value={activeCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              aria-label="X-axis category column"
+            >
+              {stringCols.concat(numericCols).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+
+            <label style={styles.selectorLabel}>Metric:</label>
+            <select
+              style={styles.select}
+              value={activeValue}
+              onChange={(e) => setSelectedValue(e.target.value)}
+              aria-label="Y-axis metric column"
+            >
+              {numericCols.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Chart */}
-      <div style={styles.chartArea}>{renderChart()}</div>
+      {/* Chart Canvas */}
+      <div style={styles.canvasWrapper}>
+        <ResponsiveContainer width="100%" height={290}>
+          {chartType === 'bar' ? (
+            <BarChart data={data} margin={{ top: 12, right: 16, left: 8, bottom: 44 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis
+                dataKey={activeCategory}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                axisLine={{ stroke: '#334155' }}
+                tickLine={{ stroke: '#334155' }}
+                angle={-25}
+                textAnchor="end"
+                interval={0}
+              />
+              <YAxis
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                axisLine={{ stroke: '#334155' }}
+                tickLine={{ stroke: '#334155' }}
+                tickFormatter={formatTick}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  borderRadius: 6,
+                  color: '#f8fafc',
+                  fontSize: 12,
+                }}
+              />
+              <Bar dataKey={activeValue} fill={PALETTE[0]} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          ) : chartType === 'line' ? (
+            <LineChart data={data} margin={{ top: 12, right: 16, left: 8, bottom: 44 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis
+                dataKey={activeCategory}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                axisLine={{ stroke: '#334155' }}
+                tickLine={{ stroke: '#334155' }}
+                angle={-25}
+                textAnchor="end"
+                interval={0}
+              />
+              <YAxis
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                axisLine={{ stroke: '#334155' }}
+                tickLine={{ stroke: '#334155' }}
+                tickFormatter={formatTick}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  borderRadius: 6,
+                  color: '#f8fafc',
+                  fontSize: 12,
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey={activeValue}
+                stroke={PALETTE[1]}
+                strokeWidth={2.5}
+                dot={{ r: 4, fill: PALETTE[1] }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          ) : (
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey={activeValue}
+                nameKey={activeCategory}
+                cx="50%"
+                cy="50%"
+                outerRadius={95}
+                innerRadius={35}
+                paddingAngle={3}
+                label={({ name, percent }: { name?: string; percent?: number }) =>
+                  `${name ?? ''}: ${((percent ?? 0) * 100).toFixed(0)}%`
+                }
+              >
+                {data.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={PALETTE[index % PALETTE.length]} stroke="#0f172a" strokeWidth={2} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  borderRadius: 6,
+                  color: '#f8fafc',
+                  fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8', paddingTop: 10 }} />
+            </PieChart>
+          )}
+        </ResponsiveContainer>
+      </div>
     </div>
   )
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    border: '1px solid #e5e7eb',
-    borderRadius: 8,
+  card: {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md)',
     overflow: 'hidden',
-    background: '#fff',
+    boxShadow: 'var(--shadow-sm)',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '10px 14px',
-    background: '#f8fafc',
-    borderBottom: '1px solid #e5e7eb',
+    backgroundColor: 'var(--bg-surface-elevated)',
+    borderBottom: '1px solid var(--border-subtle)',
     flexWrap: 'wrap',
     gap: 8,
   },
-  title: {
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    color: '#374151',
-  },
-  tabs: {
+  headerLeft: {
     display: 'flex',
+    alignItems: 'center',
+  },
+  chartTypeGroup: {
+    display: 'flex',
+    alignItems: 'center',
     gap: 4,
+    backgroundColor: 'var(--bg-canvas)',
+    padding: 2,
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--border-subtle)',
   },
-  tab: {
-    padding: '4px 14px',
-    fontSize: '0.8rem',
-    fontWeight: 500,
-    border: '1px solid #e5e7eb',
-    borderRadius: 6,
-    background: '#fff',
-    color: '#6b7280',
+  typeBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '3px 8px',
+    border: '1px solid transparent',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '0.72rem',
+    fontWeight: 600,
     cursor: 'pointer',
+    transition: 'all 0.15s ease',
   },
-  tabActive: {
-    background: '#eff6ff',
-    border: '1px solid #bfdbfe',
-    color: '#2563eb',
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  selectorGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: '0.72rem',
+  },
+  selectorLabel: {
+    color: 'var(--text-muted)',
     fontWeight: 600,
   },
-  chartArea: {
-    padding: '16px 8px',
+  select: {
+    padding: '3px 6px',
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-primary)',
+    fontSize: '0.72rem',
+    fontFamily: 'var(--font-mono)',
+  },
+  canvasWrapper: {
+    padding: '12px 14px 6px',
+  },
+  emptyContainer: {
+    padding: '32px 16px',
+    textAlign: 'center',
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md)',
+  },
+  emptyText: {
+    fontSize: '0.8rem',
+    color: 'var(--text-muted)',
   },
 }

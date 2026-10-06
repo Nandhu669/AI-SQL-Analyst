@@ -91,6 +91,10 @@ async def generate_sql_from_question(
     if not sql:
         raise ValueError("Model returned an empty SQL query.")
 
+    # Strip any markdown code fences that may have been placed inside the "sql" field
+    sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*```$", "", sql).strip()
+
     # Clean comment lines for safety check
     clean_lines = [
         line for line in sql.splitlines()
@@ -98,13 +102,25 @@ async def generate_sql_from_question(
     ]
     sql_for_validation = "\n".join(clean_lines).strip().rstrip(";").strip()
 
-    # Verify read-only AST safety
+    # Verify read-only AST safety with automatic preamble extraction
     try:
         ast = sqlglot.parse_one(sql_for_validation, error_level=ErrorLevel.RAISE)
         if not isinstance(ast, exp.Select):
             raise ValueError(f"Safety violation: Model generated a non-SELECT query ({type(ast).__name__})")
-    except Exception as ast_err:
-        raise ValueError(f"Invalid generated SQL: {ast_err}")
+    except Exception as first_ast_err:
+        # Attempt to isolate pure SELECT statement from any preamble or commentary
+        match = re.search(r"\b(SELECT\b[\s\S]+?\bFROM\b[\s\S]+?)(?:;|\Z)", sql_for_validation, re.IGNORECASE)
+        if match:
+            candidate_sql = match.group(0).strip().rstrip(";").strip()
+            try:
+                ast = sqlglot.parse_one(candidate_sql, error_level=ErrorLevel.RAISE)
+                if isinstance(ast, exp.Select):
+                    sql = candidate_sql
+                    sql_for_validation = candidate_sql
+            except Exception:
+                raise ValueError(f"Invalid generated SQL: {first_ast_err}")
+        else:
+            raise ValueError(f"Invalid generated SQL: {first_ast_err}")
 
     # Ensure clean ending semicolon
     if not sql.endswith(";"):

@@ -1,11 +1,28 @@
 /**
- * QueryHistory.tsx — Persistent Query History Panel.
+ * QueryHistory.tsx — Persistent Query History & Audit Trail Panel.
  *
- * Fetches and displays execution logs from Supabase `mcp_queries` table.
- * Allows clicking on past queries to restore and re-run them.
+ * Impeccable Craft Standards:
+ *  - Crisp SVG icons (lucide-react), zero unicode emoji
+ *  - Real Supabase database history (`mcp_queries` table)
+ *  - Search filter across historical prompts & SQL
+ *  - 1-click query restoration into the active sandbox
+ *  - Tabular numerals for latencies and timestamps
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import {
+  History,
+  RefreshCw,
+  Search,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Rows3,
+  Play,
+  CheckCircle2,
+  AlertCircle,
+  Database,
+} from 'lucide-react'
 import type { QueryHistoryItem } from '../types/query'
 
 interface QueryHistoryProps {
@@ -17,6 +34,7 @@ interface QueryHistoryProps {
 
 export function QueryHistory({ history, loading, onSelectQuery, onRefresh }: QueryHistoryProps) {
   const [isOpen, setIsOpen] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
 
   const formatTime = (isoString: string) => {
     try {
@@ -27,70 +45,135 @@ export function QueryHistory({ history, loading, onSelectQuery, onRefresh }: Que
     }
   }
 
-  return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <button style={styles.toggle} onClick={() => setIsOpen((prev) => !prev)}>
-          <span style={styles.icon}>{isOpen ? '▼' : '▶'}</span>
-          <span style={styles.title}>📜 Saved Query History</span>
-          <span style={styles.countBadge}>{history.length}</span>
-        </button>
+  const filteredHistory = useMemo(() => {
+    if (!searchTerm.trim()) return history
+    const term = searchTerm.toLowerCase()
+    return history.filter(
+      (item) =>
+        item.user_prompt.toLowerCase().includes(term) ||
+        (item.generated_query && item.generated_query.toLowerCase().includes(term))
+    )
+  }, [history, searchTerm])
 
-        <div style={styles.actions}>
-          <button style={styles.refreshBtn} onClick={onRefresh} disabled={loading}>
-            {loading ? '⏳' : '🔄 Refresh'}
+  return (
+    <div style={styles.card}>
+      {/* Header */}
+      <div style={styles.header}>
+        <div style={styles.headerLeft}>
+          <button style={styles.toggleBtn} onClick={() => setIsOpen((prev) => !prev)}>
+            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <History size={14} style={{ color: 'var(--accent-primary)' }} />
+            <span style={styles.titleText}>Saved Query History</span>
+          </button>
+          <span style={styles.countBadge} className="tabular-nums">
+            {history.length}
+          </span>
+        </div>
+
+        <div style={styles.headerRight}>
+          <button
+            style={styles.refreshBtn}
+            onClick={onRefresh}
+            disabled={loading}
+            title="Refresh history from Supabase"
+          >
+            <RefreshCw size={12} className={loading ? 'spin-anim' : ''} />
+            <span>{loading ? 'Refreshing…' : 'Refresh'}</span>
           </button>
         </div>
       </div>
 
+      {/* Body */}
       {isOpen && (
-        <div style={styles.content}>
+        <div style={styles.body}>
+          {/* Search Bar */}
+          {history.length > 0 && (
+            <div style={styles.searchBox}>
+              <Search size={12} style={styles.searchIcon} />
+              <input
+                style={styles.searchInput}
+                type="text"
+                placeholder="Filter saved queries…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                aria-label="Filter query history"
+              />
+              {searchTerm && (
+                <button style={styles.clearBtn} onClick={() => setSearchTerm('')}>
+                  ×
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* List */}
           {history.length === 0 ? (
             <div style={styles.empty}>
-              <p>No queries recorded yet in Supabase. Run a query to start tracking history!</p>
+              <Database size={20} style={{ color: 'var(--text-muted)', marginBottom: 6 }} />
+              <p style={styles.emptyText}>No queries recorded yet in Supabase.</p>
+              <span style={styles.emptySubtext}>Run an analysis to record persistent execution logs.</span>
             </div>
           ) : (
             <div style={styles.list}>
-              {history.map((item) => (
-                <div
-                  key={item.id}
-                  style={styles.card}
-                  onClick={() => onSelectQuery(item)}
-                  title="Click to reload this query into the sandbox"
-                >
-                  <div style={styles.cardTop}>
-                    <span style={styles.promptText}>{item.user_prompt}</span>
-                    <span
-                      style={{
-                        ...styles.statusBadge,
-                        background: item.status === 'success' ? '#f0fdf4' : '#fef2f2',
-                        color: item.status === 'success' ? '#16a34a' : '#dc2626',
-                        border: `1px solid ${item.status === 'success' ? '#bbf7d0' : '#fecaca'}`,
-                      }}
-                    >
-                      {item.status === 'success' ? '● Success' : '● Error'}
-                    </span>
-                  </div>
-
-                  {item.generated_query && (
-                    <code style={styles.sqlSnippet}>
-                      {item.generated_query.split('\n')[0].slice(0, 70)}...
-                    </code>
-                  )}
-
-                  <div style={styles.cardFooter}>
-                    <div style={styles.metaGroup}>
-                      {item.execution_time != null && (
-                        <span style={styles.metaBadge}>⚡ {item.execution_time}ms</span>
-                      )}
-                      {item.row_count != null && (
-                        <span style={styles.metaBadge}>📄 {item.row_count} rows</span>
-                      )}
+              {filteredHistory.map((item) => {
+                const isSuccess = item.status === 'success'
+                return (
+                  <div
+                    key={item.id}
+                    style={styles.itemCard}
+                    onClick={() => onSelectQuery(item)}
+                    title="Click to reload this query into the active sandbox"
+                  >
+                    <div style={styles.itemTop}>
+                      <span style={styles.itemPrompt}>{item.user_prompt}</span>
+                      <div
+                        style={{
+                          ...styles.statusPill,
+                          backgroundColor: isSuccess ? 'var(--accent-success-subtle)' : 'var(--accent-danger-subtle)',
+                          borderColor: isSuccess ? 'var(--accent-success-border)' : 'var(--accent-danger-border)',
+                          color: isSuccess ? 'var(--accent-success)' : 'var(--accent-danger)',
+                        }}
+                      >
+                        {isSuccess ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                        <span>{isSuccess ? 'Success' : 'Error'}</span>
+                      </div>
                     </div>
-                    <span style={styles.timeText}>{formatTime(item.created_at)}</span>
+
+                    {item.generated_query && (
+                      <code style={styles.sqlSnippet}>
+                        {item.generated_query.replace(/\s+/g, ' ').slice(0, 80)}…
+                      </code>
+                    )}
+
+                    <div style={styles.itemFooter}>
+                      <div style={styles.metaGroup}>
+                        {item.execution_time != null && (
+                          <div style={styles.metaPill}>
+                            <Clock size={10} />
+                            <span className="tabular-nums">{item.execution_time}ms</span>
+                          </div>
+                        )}
+                        {item.row_count != null && (
+                          <div style={styles.metaPill}>
+                            <Rows3 size={10} />
+                            <span className="tabular-nums">{item.row_count} rows</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={styles.footerRight}>
+                        <span style={styles.timestamp} className="tabular-nums">
+                          {formatTime(item.created_at)}
+                        </span>
+                        <div style={styles.reloadHint}>
+                          <Play size={9} />
+                          <span>Load</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -100,138 +183,202 @@ export function QueryHistory({ history, loading, onSelectQuery, onRefresh }: Que
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    border: '1px solid #e5e7eb',
-    borderRadius: 8,
+  card: {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md)',
     overflow: 'hidden',
-    background: '#fff',
+    boxShadow: 'var(--shadow-sm)',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '10px 14px',
-    background: '#f8fafc',
-    borderBottom: '1px solid #e5e7eb',
+    backgroundColor: 'var(--bg-surface-elevated)',
+    borderBottom: '1px solid var(--border-subtle)',
   },
-  toggle: {
+  headerLeft: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
+  },
+  toggleBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
     background: 'none',
     border: 'none',
+    color: 'var(--text-primary)',
     cursor: 'pointer',
     padding: 0,
   },
-  icon: {
-    fontSize: '0.65rem',
-    color: '#6b7280',
-  },
-  title: {
+  titleText: {
+    fontSize: '0.82rem',
     fontWeight: 600,
-    fontSize: '0.875rem',
-    color: '#374151',
+    color: 'var(--text-primary)',
   },
   countBadge: {
-    fontSize: '0.72rem',
-    padding: '1px 7px',
-    background: '#e0e7ff',
-    color: '#4338ca',
-    borderRadius: 12,
+    padding: '1px 6px',
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-full)',
+    fontSize: '0.68rem',
+    color: 'var(--text-secondary)',
     fontWeight: 600,
   },
-  actions: {
+  headerRight: {
     display: 'flex',
-    gap: 6,
+    alignItems: 'center',
   },
   refreshBtn: {
-    fontSize: '0.78rem',
-    padding: '3px 10px',
-    background: '#fff',
-    border: '1px solid #d1d5db',
-    borderRadius: 6,
-    color: '#374151',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '3px 8px',
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-secondary)',
+    fontSize: '0.72rem',
     cursor: 'pointer',
-    fontWeight: 500,
+    transition: 'all 0.15s ease',
   },
-  content: {
-    maxHeight: 280,
+  body: {
+    padding: 12,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    maxHeight: 380,
     overflowY: 'auto',
-    padding: 10,
-    background: '#fafafa',
+  },
+  searchBox: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 8,
+    color: 'var(--text-muted)',
+    pointerEvents: 'none',
+  },
+  searchInput: {
+    width: '100%',
+    padding: '5px 24px 5px 26px',
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-primary)',
+    fontSize: '0.75rem',
+  },
+  clearBtn: {
+    position: 'absolute',
+    right: 8,
+    background: 'none',
+    border: 'none',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
   },
   empty: {
-    padding: '20px 10px',
+    padding: '24px 16px',
     textAlign: 'center',
-    color: '#9ca3af',
-    fontSize: '0.85rem',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: '0.8rem',
+    color: 'var(--text-secondary)',
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: '0.72rem',
+    color: 'var(--text-muted)',
   },
   list: {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
   },
-  card: {
+  itemCard: {
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-sm)',
     padding: '10px 12px',
-    borderRadius: 6,
-    background: '#fff',
-    border: '1px solid #e5e7eb',
     cursor: 'pointer',
-    transition: 'border-color 0.15s, box-shadow 0.15s',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    transition: 'all 0.15s ease',
   },
-  cardTop: {
+  itemTop: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
-  promptText: {
+  itemPrompt: {
+    fontSize: '0.78rem',
     fontWeight: 600,
-    fontSize: '0.85rem',
-    color: '#1f2937',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '75%',
+    color: 'var(--text-primary)',
+    lineHeight: 1.4,
   },
-  statusBadge: {
-    fontSize: '0.7rem',
-    padding: '2px 8px',
-    borderRadius: 10,
+  statusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 6px',
+    borderRadius: 'var(--radius-full)',
+    border: '1px solid',
+    fontSize: '0.65rem',
     fontWeight: 600,
+    flexShrink: 0,
   },
   sqlSnippet: {
-    display: 'block',
-    fontSize: '0.75rem',
-    color: '#6b7280',
-    background: '#f3f4f6',
-    padding: '4px 8px',
-    borderRadius: 4,
-    margin: '6px 0',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.7rem',
+    color: 'var(--text-muted)',
+    backgroundColor: 'var(--bg-surface)',
+    padding: '4px 6px',
+    borderRadius: 3,
+    whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
   },
-  cardFooter: {
+  itemFooter: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
   metaGroup: {
     display: 'flex',
+    alignItems: 'center',
     gap: 6,
   },
-  metaBadge: {
-    fontSize: '0.72rem',
-    color: '#4b5563',
-    background: '#f1f5f9',
-    padding: '1px 6px',
-    borderRadius: 4,
+  metaPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    fontSize: '0.68rem',
+    color: 'var(--text-muted)',
   },
-  timeText: {
-    fontSize: '0.72rem',
-    color: '#9ca3af',
+  footerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timestamp: {
+    fontSize: '0.68rem',
+    color: 'var(--text-muted)',
+  },
+  reloadHint: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    fontSize: '0.68rem',
+    color: 'var(--accent-primary)',
+    fontWeight: 600,
   },
 }

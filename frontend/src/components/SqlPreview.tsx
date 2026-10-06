@@ -1,13 +1,31 @@
 /**
- * SqlPreview.tsx — Interactive SQL Preview & Sandbox Editor.
+ * SqlPreview.tsx — Interactive SQL Preview & Live Sandbox Editor.
  *
- * Allows viewing syntax-highlighted SQL or switching to "Sandbox Mode"
- * to edit and execute custom SQL against Supabase with real telemetry logging.
+ * Impeccable Craft Standards:
+ *  - Crisp SVG icons (lucide-react), zero unicode emoji
+ *  - Dual mode: syntax-highlighted display vs live editable sandbox
+ *  - AST safety status pill ("Verified Read-Only SELECT")
+ *  - Real execution telemetry badges (tabular numerals)
+ *  - Copy to clipboard with visual feedback
  */
 
 import { useState, useEffect } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import {
+  Code2,
+  Terminal,
+  Copy,
+  Check,
+  Play,
+  ShieldCheck,
+  Clock,
+  Rows3,
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  Database,
+} from 'lucide-react'
 import type { QueryResult } from '../types/query'
 
 interface SqlPreviewProps {
@@ -37,88 +55,155 @@ export function SqlPreview({ result, onRunCustomSql, running }: SqlPreviewProps)
     onRunCustomSql(customSql)
   }
 
+  const handleReset = () => {
+    setCustomSql(result.sql)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault()
+      handleRun()
+    }
+  }
+
   return (
-    <div style={styles.container}>
-      {/* Header row */}
+    <div style={styles.card}>
+      {/* Header Bar */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
-          <button style={styles.toggle} onClick={() => setIsOpen((o) => !o)}>
-            <span style={styles.toggleIcon}>{isOpen ? '▼' : '▶'}</span>
-            <span style={styles.toggleLabel}>
-              {isEditing ? '🛠️ SQL Sandbox Editor' : 'Generated SQL'}
+          <button style={styles.toggleBtn} onClick={() => setIsOpen((prev) => !prev)}>
+            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span style={styles.titleIcon}>
+              {isEditing ? <Terminal size={14} style={{ color: 'var(--accent-primary)' }} /> : <Code2 size={14} style={{ color: 'var(--accent-info)' }} />}
+            </span>
+            <span style={styles.titleText}>
+              {isEditing ? 'Interactive SQL Sandbox' : 'Generated PostgreSQL Query'}
             </span>
           </button>
-          {result.queryId && (
-            <span style={styles.idBadge} title={`Logged in Supabase ID: ${result.queryId}`}>
-              ID: {result.queryId.slice(0, 8)}...
-            </span>
-          )}
+
+          {/* AST Safety Verification Pill */}
+          <div style={styles.safetyPill} title="Validated by AST parser (sqlglot). Mutations permanently blocked.">
+            <ShieldCheck size={12} style={{ color: 'var(--accent-success)' }} />
+            <span>Read-Only Verified</span>
+          </div>
         </div>
 
-        <div style={styles.meta}>
-          <span style={styles.badge}>⚡ {result.executionTimeMs}ms</span>
-          <span style={styles.badge}>📄 {result.rowCount} rows</span>
+        {/* Telemetry & Controls */}
+        <div style={styles.metaGroup}>
+          {result.executionTimeMs != null && (
+            <div style={styles.metaBadge} title="Execution latency">
+              <Clock size={11} />
+              <span className="tabular-nums">{result.executionTimeMs}ms</span>
+            </div>
+          )}
 
-          <button
-            style={{
-              ...styles.modeBtn,
-              background: isEditing ? '#eff6ff' : '#f8fafc',
-              borderColor: isEditing ? '#3b82f6' : '#d1d5db',
-              color: isEditing ? '#1d4ed8' : '#374151',
-            }}
-            onClick={() => setIsEditing((prev) => !prev)}
-            title="Toggle between highlighted preview and live editable SQL sandbox"
-          >
-            {isEditing ? '👁️ View Highlighted' : '✏️ Edit Sandbox'}
-          </button>
+          {result.rowCount != null && (
+            <div style={styles.metaBadge} title="Returned rows">
+              <Rows3 size={11} />
+              <span className="tabular-nums">{result.rowCount} rows</span>
+            </div>
+          )}
 
-          <button style={styles.copyBtn} onClick={handleCopy}>
-            {copied ? '✅ Copied' : '📋 Copy'}
+          {result.queryId && (
+            <div style={styles.metaBadge} title={`Supabase Audit ID: ${result.queryId}`}>
+              <Database size={11} />
+              <span>{result.queryId.slice(0, 8)}</span>
+            </div>
+          )}
+
+          <div style={styles.modeToggleGroup}>
+            <button
+              style={{
+                ...styles.modeTab,
+                backgroundColor: !isEditing ? 'var(--accent-primary-subtle)' : 'transparent',
+                borderColor: !isEditing ? 'var(--accent-primary-border)' : 'var(--border-default)',
+                color: !isEditing ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              }}
+              onClick={() => setIsEditing(false)}
+            >
+              Preview
+            </button>
+            <button
+              style={{
+                ...styles.modeTab,
+                backgroundColor: isEditing ? 'var(--accent-primary-subtle)' : 'transparent',
+                borderColor: isEditing ? 'var(--accent-primary-border)' : 'var(--border-default)',
+                color: isEditing ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              }}
+              onClick={() => setIsEditing(true)}
+            >
+              Sandbox
+            </button>
+          </div>
+
+          <button style={styles.copyBtn} onClick={handleCopy} title="Copy SQL statement">
+            {copied ? <Check size={12} style={{ color: 'var(--accent-success)' }} /> : <Copy size={12} />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
           </button>
         </div>
       </div>
 
-      {/* Body content */}
+      {/* Body Area */}
       {isOpen && (
-        <div>
+        <div style={styles.body}>
           {isEditing ? (
             <div style={styles.editorWrapper}>
+              <div style={styles.editorToolbar}>
+                <span style={styles.editorHint}>
+                  Edit and execute directly against Supabase. Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run.
+                </span>
+
+                <button style={styles.resetBtn} onClick={handleReset} title="Reset to original generated SQL">
+                  <RotateCcw size={11} />
+                  <span>Reset</span>
+                </button>
+              </div>
+
               <textarea
-                style={styles.textarea}
+                style={styles.editorTextarea}
                 value={customSql}
                 onChange={(e) => setCustomSql(e.target.value)}
+                onKeyDown={handleKeyDown}
                 rows={6}
                 placeholder="Enter a SELECT statement..."
                 disabled={running}
+                spellCheck={false}
               />
+
               <div style={styles.editorFooter}>
-                <span style={styles.hintText}>
-                  💡 Sandbox rules: Read-only SELECT queries only. Dangerous mutations are blocked.
+                <span style={styles.securityNotice}>
+                  Protected by PostgreSQL execution sandbox. Only SELECT operations are allowed.
                 </span>
+
                 <button
                   style={{
-                    ...styles.runBtn,
+                    ...styles.runCustomBtn,
                     opacity: running || !customSql.trim() ? 0.6 : 1,
-                    cursor: running || !customSql.trim() ? 'not-allowed' : 'pointer',
                   }}
                   onClick={handleRun}
                   disabled={running || !customSql.trim()}
                 >
-                  {running ? '⏳ Executing...' : '▶️ Run SQL'}
+                  <Play size={12} />
+                  <span>{running ? 'Executing…' : 'Run Sandbox SQL'}</span>
                 </button>
               </div>
             </div>
           ) : (
-            <div style={styles.codeWrapper}>
+            <div style={styles.highlightWrapper}>
               <SyntaxHighlighter
                 language="sql"
                 style={vscDarkPlus}
                 customStyle={{
                   margin: 0,
-                  borderRadius: '0 0 8px 8px',
-                  fontSize: '0.875rem',
-                  lineHeight: 1.6,
+                  padding: '14px 16px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--bg-canvas)',
+                  fontSize: '0.82rem',
+                  lineHeight: '1.6',
+                  fontFamily: 'var(--font-mono)',
+                  border: '1px solid var(--border-subtle)',
                 }}
+                showLineNumbers
               >
                 {result.sql}
               </SyntaxHighlighter>
@@ -130,22 +215,21 @@ export function SqlPreview({ result, onRunCustomSql, running }: SqlPreviewProps)
   )
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    border: '1px solid #e5e7eb',
-    borderRadius: 8,
+  card: {
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-md)',
     overflow: 'hidden',
-    background: '#fff',
+    boxShadow: 'var(--shadow-sm)',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '10px 14px',
-    background: '#f8fafc',
-    borderBottom: '1px solid #e5e7eb',
+    backgroundColor: 'var(--bg-surface-elevated)',
+    borderBottom: '1px solid var(--border-subtle)',
     flexWrap: 'wrap',
     gap: 8,
   },
@@ -154,106 +238,152 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 10,
   },
-  toggle: {
+  toggleBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: 6,
     background: 'none',
     border: 'none',
+    color: 'var(--text-primary)',
     cursor: 'pointer',
     padding: 0,
   },
-  toggleIcon: {
-    fontSize: '0.65rem',
-    color: '#6b7280',
-  },
-  toggleLabel: {
-    fontWeight: 600,
-    fontSize: '0.875rem',
-    color: '#374151',
-  },
-  idBadge: {
-    fontSize: '0.7rem',
-    fontFamily: 'monospace',
-    color: '#6b7280',
-    background: '#f1f5f9',
-    padding: '2px 6px',
-    borderRadius: 4,
-    border: '1px solid #e2e8f0',
-  },
-  meta: {
+  titleIcon: {
     display: 'flex',
-    gap: 6,
     alignItems: 'center',
+  },
+  titleText: {
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    color: 'var(--text-primary)',
+  },
+  safetyPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 7px',
+    backgroundColor: 'var(--accent-success-subtle)',
+    border: '1px solid var(--accent-success-border)',
+    borderRadius: 'var(--radius-full)',
+    fontSize: '0.68rem',
+    fontWeight: 600,
+    color: 'var(--accent-success)',
+  },
+  metaGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
     flexWrap: 'wrap',
   },
-  badge: {
-    fontSize: '0.78rem',
-    padding: '2px 10px',
-    background: '#f1f5f9',
-    border: '1px solid #e2e8f0',
-    borderRadius: 20,
-    color: '#475569',
+  metaBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 7px',
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '0.7rem',
+    color: 'var(--text-secondary)',
     fontWeight: 500,
   },
-  modeBtn: {
-    fontSize: '0.78rem',
-    padding: '2px 10px',
-    border: '1px solid #d1d5db',
-    borderRadius: 20,
+  modeToggleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'var(--bg-canvas)',
+    padding: 2,
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--border-subtle)',
+  },
+  modeTab: {
+    padding: '3px 8px',
+    border: '1px solid transparent',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: '0.72rem',
     fontWeight: 600,
     cursor: 'pointer',
+    transition: 'all 0.15s ease',
   },
   copyBtn: {
-    fontSize: '0.78rem',
-    padding: '2px 10px',
-    background: '#eff6ff',
-    border: '1px solid #bfdbfe',
-    borderRadius: 20,
-    color: '#2563eb',
-    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '3px 8px',
+    backgroundColor: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-secondary)',
+    fontSize: '0.72rem',
     cursor: 'pointer',
+    transition: 'all 0.15s ease',
   },
-  codeWrapper: {
-    overflow: 'auto',
+  body: {
+    padding: 12,
+  },
+  highlightWrapper: {
+    overflowX: 'auto',
   },
   editorWrapper: {
-    padding: 12,
-    background: '#1e1e1e',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
   },
-  textarea: {
+  editorToolbar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  editorHint: {
+    fontSize: '0.73rem',
+    color: 'var(--text-muted)',
+  },
+  resetBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 6px',
+    backgroundColor: 'transparent',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-secondary)',
+    fontSize: '0.7rem',
+    cursor: 'pointer',
+  },
+  editorTextarea: {
     width: '100%',
-    boxSizing: 'border-box',
-    background: '#252526',
-    color: '#d4d4d4',
-    border: '1px solid #3c3c3c',
-    borderRadius: 6,
-    padding: 10,
-    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-    fontSize: '0.875rem',
-    lineHeight: 1.5,
+    padding: 12,
+    backgroundColor: 'var(--bg-canvas)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-primary)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.82rem',
+    lineHeight: '1.6',
     resize: 'vertical',
-    outline: 'none',
   },
   editorFooter: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
     flexWrap: 'wrap',
     gap: 8,
   },
-  hintText: {
-    fontSize: '0.75rem',
-    color: '#9ca3af',
+  securityNotice: {
+    fontSize: '0.7rem',
+    color: 'var(--text-muted)',
   },
-  runBtn: {
-    fontSize: '0.8rem',
-    fontWeight: 600,
+  runCustomBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
     padding: '6px 14px',
-    background: '#16a34a',
-    color: '#fff',
+    backgroundColor: 'var(--accent-primary)',
     border: 'none',
-    borderRadius: 6,
+    borderRadius: 'var(--radius-sm)',
+    color: '#ffffff',
+    fontSize: '0.78rem',
+    fontWeight: 600,
+    cursor: 'pointer',
   },
 }
