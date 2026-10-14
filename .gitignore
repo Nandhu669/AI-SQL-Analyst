@@ -8,6 +8,7 @@ venv/
 *.egg-info/
 dist/
 *.so
+*.log
 
 # ─── Environment / Secrets (NEVER commit real .env) ───────────────────────────
 .env

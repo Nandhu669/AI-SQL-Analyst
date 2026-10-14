@@ -31,8 +31,27 @@ export interface QueryResult {
   rowCount: number
   /** Persistent query UUID from mcp_queries table in Supabase */
   queryId?: string
+  /** Persistent audit UUID from query_audit_logs table in Supabase */
+  auditId?: string
   /** Associated user prompt or question */
   prompt?: string
+  /** AST read-only verification flag */
+  readOnlyVerified?: boolean
+  /** Safety verification details */
+  safetyReason?: string
+}
+
+/**
+ * Security audit record fetched from GET /api/v1/mcp/audits.
+ * Mirrors a record from query_audit_logs table in Supabase.
+ */
+export interface AuditLogItem {
+  id: string
+  query_id?: string | null
+  safety_check: boolean
+  read_only_verified: boolean
+  reason?: string | null
+  created_at: string
 }
 
 /**

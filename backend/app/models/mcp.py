@@ -66,13 +66,28 @@ class QueryResponse(BaseModel):
 class ExecuteResponse(BaseModel):
     """
     POST /api/v1/mcp/execute — returned by the backend.
-    Contains the query results as columns + rows, plus the persistent query_id.
+    Contains the query results as columns + rows, plus the persistent query_id and audit telemetry.
     """
     query_id: str | None = Field(default=None, description="Persistent UUID of the query record in mcp_queries")
+    audit_id: str | None = Field(default=None, description="Persistent UUID of the audit record in query_audit_logs")
     columns: list[str] = Field(description="Column names from the result set")
     rows: list[dict[str, Any]] = Field(description="Result rows as key-value pairs")
     execution_time_ms: int = Field(description="How long the query took in milliseconds")
     row_count: int = Field(description="Total number of rows returned")
+    read_only_verified: bool = Field(default=True, description="Whether AST verified query as read-only")
+    safety_reason: str = Field(default="Verified read-only SELECT via sqlglot AST", description="Safety verification details")
+
+
+class AuditLogItem(BaseModel):
+    """
+    Record from query_audit_logs table in Supabase.
+    """
+    id: str = Field(description="Audit record UUID")
+    query_id: str | None = Field(default=None, description="Linked mcp_queries record UUID")
+    safety_check: bool = Field(description="True if query syntax & AST checks passed")
+    read_only_verified: bool = Field(description="True if query is strictly read-only SELECT")
+    reason: str | None = Field(default=None, description="Safety verification reason or violation details")
+    created_at: str = Field(description="ISO timestamp of audit event")
 
 
 class QueryHistoryItem(BaseModel):

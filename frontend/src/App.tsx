@@ -27,6 +27,7 @@ import {
   Brain,
   ChevronDown,
   ChevronUp,
+  ShieldCheck,
 } from 'lucide-react'
 
 import { StatusBar } from './components/StatusBar'
@@ -36,13 +37,14 @@ import { ResultsChart } from './components/ResultsChart'
 import { ResultsTable } from './components/ResultsTable'
 import { QueryHistory } from './components/QueryHistory'
 import { SchemaExplorer } from './components/SchemaExplorer'
+import { SecurityAuditLogs } from './components/SecurityAuditLogs'
 import { ShortcutModal } from './components/ShortcutModal'
 
 import { generateQuery, executeQuery, fetchQueryHistory } from './api/mcp'
 import type { QueryResult, QueryStatus, QueryHistoryItem } from './types/query'
 
 type WorkspaceView = 'overview' | 'table' | 'sandbox' | 'split'
-type SidebarTab = 'schema' | 'history'
+type SidebarTab = 'schema' | 'history' | 'audits'
 
 export function App() {
   const [status, setStatus] = useState<QueryStatus>('idle')
@@ -114,6 +116,9 @@ export function App() {
         executionTimeMs: execResult.execution_time_ms,
         rowCount: execResult.row_count,
         queryId: execResult.query_id,
+        auditId: execResult.audit_id,
+        readOnlyVerified: execResult.read_only_verified,
+        safetyReason: execResult.safety_reason,
         prompt: question,
       }
 
@@ -144,6 +149,9 @@ export function App() {
         executionTimeMs: execResult.execution_time_ms,
         rowCount: execResult.row_count,
         queryId: execResult.query_id,
+        auditId: execResult.audit_id,
+        readOnlyVerified: execResult.read_only_verified,
+        safetyReason: execResult.safety_reason,
         prompt: promptLabel,
       }
 
@@ -177,6 +185,9 @@ export function App() {
         executionTimeMs: execResult.execution_time_ms,
         rowCount: execResult.row_count,
         queryId: execResult.query_id || item.id,
+        auditId: execResult.audit_id,
+        readOnlyVerified: execResult.read_only_verified,
+        safetyReason: execResult.safety_reason,
         prompt: item.user_prompt,
       }
 
@@ -266,23 +277,37 @@ export function App() {
                 onClick={() => setSidebarTab('history')}
               >
                 <History size={13} />
-                <span>Query History</span>
+                <span>History</span>
                 <span style={styles.tabBadge} className="tabular-nums">
                   {history.length}
                 </span>
+              </button>
+
+              <button
+                style={{
+                  ...styles.sidebarTabBtn,
+                  borderBottomColor: sidebarTab === 'audits' ? 'var(--accent-primary)' : 'transparent',
+                  color: sidebarTab === 'audits' ? 'var(--text-primary)' : 'var(--text-muted)',
+                }}
+                onClick={() => setSidebarTab('audits')}
+              >
+                <ShieldCheck size={13} />
+                <span>Audits</span>
               </button>
             </div>
 
             <div style={styles.sidebarContent}>
               {sidebarTab === 'schema' ? (
                 <SchemaExplorer onInsertText={handleInsertSchemaText} onRunTemplate={handleRunTemplate} />
-              ) : (
+              ) : sidebarTab === 'history' ? (
                 <QueryHistory
                   history={history}
                   loading={historyLoading}
                   onSelectQuery={handleSelectHistoryQuery}
                   onRefresh={loadHistory}
                 />
+              ) : (
+                <SecurityAuditLogs />
               )}
             </div>
           </aside>

@@ -105,9 +105,16 @@ export function SqlPreview({ result, onRunCustomSql, running }: SqlPreviewProps)
           )}
 
           {result.queryId && (
-            <div style={styles.metaBadge} title={`Supabase Audit ID: ${result.queryId}`}>
+            <div style={styles.metaBadge} title={`Supabase Query ID: ${result.queryId}`}>
               <Database size={11} />
-              <span>{result.queryId.slice(0, 8)}</span>
+              <span>Query: {result.queryId.slice(0, 8)}</span>
+            </div>
+          )}
+
+          {result.auditId && (
+            <div style={styles.metaBadge} title={`Security Audit Log ID: ${result.auditId}`}>
+              <ShieldCheck size={11} style={{ color: 'var(--accent-success)' }} />
+              <span>Audit: {result.auditId.slice(0, 8)}</span>
             </div>
           )}
 

@@ -2,7 +2,7 @@
  * mcp.ts — API client for FastAPI MCP endpoints.
  */
 
-import type { QueryHistoryItem } from '../types/query'
+import type { QueryHistoryItem, AuditLogItem } from '../types/query'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -16,10 +16,13 @@ export interface QueryResponse {
 
 export interface ExecuteResponse {
   query_id?: string
+  audit_id?: string
   columns: string[]
   rows: Record<string, unknown>[]
   execution_time_ms: number
   row_count: number
+  read_only_verified?: boolean
+  safety_reason?: string
 }
 
 export interface ToolDefinition {
@@ -108,4 +111,14 @@ export async function fetchSchema(): Promise<SchemaResponse> {
   const res = await fetch(`${API_BASE}/api/v1/mcp/schema`)
   if (!res.ok) throw new Error(`Schema fetch failed: HTTP ${res.status}`)
   return res.json() as Promise<SchemaResponse>
+}
+
+/**
+ * GET /api/v1/mcp/audits
+ * Fetches recent security audit logs from Supabase query_audit_logs table.
+ */
+export async function fetchAuditLogs(): Promise<AuditLogItem[]> {
+  const res = await fetch(`${API_BASE}/api/v1/mcp/audits`)
+  if (!res.ok) throw new Error(`Audit logs fetch failed: HTTP ${res.status}`)
+  return res.json() as Promise<AuditLogItem[]>
 }

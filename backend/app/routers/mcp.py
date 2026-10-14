@@ -34,7 +34,7 @@ from app.ai.generator import generate_sql_from_question
 from app.models.mcp import (
     QueryRequest, QueryResponse,
     ExecuteRequest, ExecuteResponse,
-    QueryHistoryItem,
+    QueryHistoryItem, AuditLogItem,
     ToolDefinition,
     SchemaColumn, SchemaTable, SchemaResponse,
 )
@@ -202,12 +202,36 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
         )
 
     if not isinstance(parsed, exp.Select):
+        stmt_type = type(parsed).__name__
+        blocked_reason = (
+            f"Blocked prohibited statement: {stmt_type}. "
+            "Only SELECT queries are permitted in this read-only sandbox."
+        )
+        try:
+            supabase = get_supabase()
+            q_res = supabase.table("mcp_queries").insert({
+                "user_prompt": body.prompt or "Direct SQL Sandbox Execution",
+                "generated_query": clean_sql,
+                "execution_time": 0,
+                "row_count": 0,
+                "status": "error",
+            }).execute()
+            blocked_qid = q_res.data[0].get("id") if q_res.data else None
+            supabase.table("query_audit_logs").insert({
+                "query_id": blocked_qid,
+                "safety_check": False,
+                "read_only_verified": False,
+                "reason": blocked_reason,
+            }).execute()
+        except Exception:
+            pass
+
         raise HTTPException(
             status_code=400,
             detail=(
-                "Only SELECT queries are allowed in this sandbox. "
-                f"Received statement type: {type(parsed).__name__}. "
-                "Mutations (INSERT, UPDATE, DELETE, DROP, ALTER) are permanently blocked."
+                f"Only SELECT queries are allowed in this sandbox. "
+                f"Received statement type: {stmt_type}. "
+                "Mutations (INSERT, UPDATE, DELETE, DROP, ALTER) are permanently blocked and recorded in security audit logs."
             ),
         )
 
@@ -264,6 +288,7 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
 
     elapsed_ms = max(int((time.perf_counter() - start) * 1000), 5)
     query_id: str | None = None
+    audit_id: str | None = None
 
     # ── Step 3: Log query in mcp_queries & retrieve ID ───────────────────────
     try:
@@ -279,13 +304,61 @@ async def execute_query(body: ExecuteRequest) -> ExecuteResponse:
     except Exception:
         pass
 
+    # ── Step 4: Record audit log in query_audit_logs ─────────────────────────
+    try:
+        audit_res = supabase.table("query_audit_logs").insert({
+            "query_id": query_id,
+            "safety_check": True,
+            "read_only_verified": True,
+            "reason": "Verified read-only SELECT via sqlglot AST",
+        }).execute()
+        if audit_res.data and len(audit_res.data) > 0:
+            audit_id = str(audit_res.data[0].get("id"))
+    except Exception:
+        pass
+
     return ExecuteResponse(
         query_id=query_id,
+        audit_id=audit_id,
         columns=columns,
         rows=rows,
         execution_time_ms=elapsed_ms,
         row_count=len(rows),
+        read_only_verified=True,
+        safety_reason="Verified read-only SELECT via sqlglot AST",
     )
+
+
+# ── GET /api/v1/mcp/audits ───────────────────────────────────────────────────
+
+@router.get("/audits", response_model=list[AuditLogItem], summary="Get query safety audit logs")
+async def get_audit_logs() -> list[AuditLogItem]:
+    """
+    Returns recent security audit logs from the query_audit_logs table in Supabase.
+    Ordered by most recent audit event first.
+    """
+    try:
+        supabase = get_supabase()
+        res = (
+            supabase.table("query_audit_logs")
+            .select("id, query_id, safety_check, read_only_verified, reason, created_at")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return [
+            AuditLogItem(
+                id=str(row["id"]),
+                query_id=str(row["query_id"]) if row.get("query_id") else None,
+                safety_check=bool(row.get("safety_check")),
+                read_only_verified=bool(row.get("read_only_verified")),
+                reason=row.get("reason"),
+                created_at=str(row.get("created_at")),
+            )
+            for row in (res.data or [])
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch audit logs: {e}")
 
 
 # ── GET /api/v1/mcp/queries ──────────────────────────────────────────────────
